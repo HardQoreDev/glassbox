@@ -1,0 +1,17 @@
+{
+  "name": "hardqoredev-claude-code-mods",
+  "description": "I mod di Claude Code di HardQoreDev: barra laterale (hook, branch, file, turni) e pulsanti di copia",
+  "owner": {
+    "name": "HardQoreDev"
+  },
+  "plugins": [
+    {
+      "name": "barra-laterale",
+      "source": "./mods/barra-laterale"
+    },
+    {
+      "name": "copia-risposta",
+      "source": "./mods/copia-risposta"
+    }
+  ]
+}

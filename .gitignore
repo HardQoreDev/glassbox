@@ -1,0 +1,8 @@
+# I tipi che Claude Code rigenera quando carica un mod.
+**/.claude-plugin/types/
+# File di sistema, editor e log.
+.DS_Store
+*~
+*.swp
+*.log
+node_modules/

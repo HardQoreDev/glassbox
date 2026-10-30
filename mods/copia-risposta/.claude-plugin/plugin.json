@@ -1,0 +1,9 @@
+{
+  "name": "copia-risposta",
+  "version": "0.2.0",
+  "description": "Tre pulsanti nel footer del prompt: [CP] copia la risposta di Claude dopo il tuo ultimo messaggio, [IN] il tuo ultimo messaggio, [BZ] la bozza non ancora inviata, con i testi incollati per intero",
+  "author": {
+    "name": "HardQoreDev"
+  },
+  "types": "./types/index.d.ts"
+}

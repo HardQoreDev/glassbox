@@ -1,0 +1,9 @@
+{
+  "name": "barra-laterale",
+  "version": "0.4.1",
+  "description": "A sidebar on the right in four sections: hooks to turn on and off, the branch graph like in VS Code, the files changed in the session or the folder tree like in filetree, and the turns like in turn-inspector",
+  "author": {
+    "name": "HardQoreDev"
+  },
+  "license": "MIT"
+}
