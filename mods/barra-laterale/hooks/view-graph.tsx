@@ -163,14 +163,17 @@ export function branchLines(width: number, now: number, select: (hash: string) =
     const graphW = row.cells.length * 2
     // Lo spazio dopo le corsie prende il posto di quello davanti al primo nome.
     const { badges, isCut } = badgesIn(row, Math.max(4, width - graphW - len(count)))
-    const pad = ' '.repeat(Math.max(1, width - graphW - Math.max(0, badgesW(badges) - 1) - len(count)))
+    // Un punto di separazione non ha nomi: si clicca sul suo hash.
+    const hash = badges.length === 0 ? c.short : ''
+    const pad = ' '.repeat(Math.max(1, width - graphW - Math.max(0, badgesW(badges) - 1) - len(hash) - len(count)))
     const names = c.refs.map(r => r.name)
 
+    // Le corsie stanno fuori dal pulsante, che il motore inverte per intero.
     lines.push(el => (
       <el.Box key={`s:${c.hash}`} flexDirection="row" height={1} overflow="hidden" backgroundColor={isSelected ? SELECTED_BG : undefined}>
+        {cellsEl(el, row)}
         <el.Button key={`branch:${c.hash}`} plain label={names.length > 0 ? names.join(', ') : c.short} onPress={() => select(c.hash)}>
-          {cellsEl(el, row)}
-          {badgeEls(el, badges, false)}
+          {hash ? <el.Text dimColor>{hash}</el.Text> : badgeEls(el, badges, false)}
         </el.Button>
         <el.Text>{pad}</el.Text>
         <el.Text dimColor>{count}</el.Text>

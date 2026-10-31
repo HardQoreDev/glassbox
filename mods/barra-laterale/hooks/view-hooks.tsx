@@ -31,9 +31,12 @@ export function hookLines(width: number, now: number, toggle: (h: SettingsHook) 
     const isManaged = hook.source === 'policy'
     const g = hooks.glow.get(hook.id)
     const glow = g !== undefined && g.until > now ? g.kind : undefined
-    const sw = isManaged ? ' MANAGED ' : isOff ? ' OFF ' : '  ON '
+    // ON ha nel suo riquadro uno spazio per parte come OFF, così la parola sta
+    // al centro; la colonna che manca va nel riempimento a sinistra.
+    const sw = isManaged ? ' MANAGED ' : isOff ? ' OFF ' : ' ON '
+    const swW = Math.max(len(sw), len(' OFF '))
     const status = glow ? WORD[glow] : isOff && sharesEvent(hook) ? ' ⚠ runs anyway' : ''
-    const room = Math.max(4, width - 2 - len(sw) - 1 - len(status))
+    const room = Math.max(4, width - 2 - swW - 1 - len(status))
     const name = fit(hook.label, room)
     const where = fit(` ${hook.matcher ? `${hook.event} · ${hook.matcher}` : hook.event}`, Math.max(0, room - len(name)))
     const pad = ' '.repeat(Math.max(0, width - 2 - len(name) - len(where) - len(status) - len(sw)))
@@ -53,7 +56,7 @@ export function hookLines(width: number, now: number, toggle: (h: SettingsHook) 
         {isManaged ? (
           <el.Text dimColor>{sw}</el.Text>
         ) : (
-          <el.Button key={`hook:${i}`} plain label={sw} onPress={() => toggle(hook)}>
+          <el.Button key={`hook:${i}`} plain label={sw.trim()} onPress={() => toggle(hook)}>
             <el.Text bold backgroundColor={isOff ? OFF.bg : ON.bg} color={isOff ? OFF.fg : ON.fg}>
               {sw}
             </el.Text>

@@ -2,7 +2,7 @@
 // hooks/turn-inspector.tsx) spezzato in righe, perché la sezione ne mostra
 // solo quante ne stanno. Stessa palette: input in terracotta, output in grigio.
 import { turns } from './turns-state'
-import { cell, fit } from './ui'
+import { cell, fit, len } from './ui'
 import type { Line } from './ui'
 import { barCells, contextAfter, fmtTokens, gist, inputStack } from './vendor/turns'
 import type { Block, BlockKind, Turn } from './vendor/turns'
@@ -118,14 +118,16 @@ export function turnLines(width: number, toggle: (n: number) => void): Line[] {
     const right = (after !== undefined ? fmtTokens(after) : '…').padStart(6)
     const barW = Math.max(6, Math.min(16, Math.floor(width / 4)))
     const labelW = Math.max(6, width - barW - 10)
-    const label = cell(`#${t.n} ${gist(t)}`, labelW)
+    // Il riempimento sta fuori dal pulsante, che il motore inverte per intero.
+    const label = fit(`#${t.n} ${gist(t)}`, labelW)
+    const fill = cell('', labelW - len(label))
     const mark = t.status === 'failed' ? '✗' : isOpen ? '▾' : '▸'
     const markColor = t.status === 'failed' ? 'red' : t === turns.live ? 'yellow' : INPUT_RAIL
     lines.push(el => (
       <el.Box key={`t:${t.n}`} flexDirection="row" height={1} overflow="hidden">
         <el.Text color={markColor}>{`${mark} `}</el.Text>
         <el.Button key={`turn:${t.n}`} plain dimColor={!isOpen && t !== turns.live} label={label} onPress={() => toggle(t.n)} />
-        <el.Text> </el.Text>
+        <el.Text>{`${fill} `}</el.Text>
         <el.Text>
           {bar(t, barW).map(s => (
             <el.Text color={s.color}>{s.text}</el.Text>

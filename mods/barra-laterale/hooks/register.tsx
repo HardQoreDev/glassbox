@@ -8,6 +8,7 @@ import type { EngineInterface, Register, RenderElement, ToolCallInput } from 'cl
 
 import { FLASH_MS, readText, refreshDirs, reveal, toggleDir, touch, tree, visibleRows } from './files'
 import type { FileRow, Tone } from './files'
+import { openFile } from './open'
 import { closePreview, openPreview, preview, refreshPreview } from './preview'
 import { refreshRepo } from './repo'
 import { GLOW_MS, hooks, loadHooks, matches, subjectOf } from './settings-hooks'
@@ -270,7 +271,11 @@ export const register: Register = on => {
         showView('tree')
         void reveal($, path).then(() => redraw($))
       }
-      return <Box flexDirection="column">{previewLines(el, width, layout, FILES_COLOR, back, showInTree, slide)}</Box>
+      const toggleWrap = () => {
+        preview.wrap = !preview.wrap
+        redraw($)
+      }
+      return <Box flexDirection="column">{previewLines(el, width, layout, FILES_COLOR, { back, showInTree, slide, toggleWrap })}</Box>
     }
 
     const content: Record<SectionId, () => Line[]> = {
@@ -285,7 +290,15 @@ export const register: Register = on => {
       files: () =>
         filesView === 'tree'
           ? fileLines(inner, now, fileRows, pressFile)
-          : touchedLines(inner, now, t => void openPreview($, t.path).then(() => redraw($))),
+          : touchedLines(
+              inner,
+              now,
+              t => void openPreview($, t.path).then(() => redraw($)),
+              t =>
+                void openFile($, t.path).catch(err => {
+                  $.ui.toast(`Could not open ${t.path.split('/').pop()}: ${err instanceof Error ? err.message : err}`)
+                }),
+            ),
       turns: () =>
         turnLines(inner, n => {
           if (turns.expanded.has(n)) turns.expanded.delete(n)
@@ -348,7 +361,9 @@ export const register: Register = on => {
     }
 
     // Il titolo: la barretta colorata, il nome, le informazioni, gli strumenti a
-    // destra. Da aperta la sezione ha sotto una riga sottile del suo colore.
+    // destra. Da aperta la sezione ha sotto una riga sottile del suo colore. I
+    // pulsanti tengono solo la loro parola: il motore inverte tutto quello che
+    // hanno dentro, e uno spazio o la barretta lo sposterebbero di lato.
     const header = (id: SectionId, title: string, color: string): RenderElement[] => {
       const open = isOpen[id]
       const label = `▌ ${title}`
@@ -365,18 +380,20 @@ export const register: Register = on => {
       const pad = ' '.repeat(Math.max(1, width - len(label) - 2 - used - toolsW))
       const titleRow = (
         <Box key={`h:${id}`} flexDirection="row" height={1} overflow="hidden">
+          <Text color={color} dimColor={!open}>
+            ▌{' '}
+          </Text>
           <Button
             key={`section:${id}`}
             plain
-            label={label}
+            label={title}
             onPress={() => {
               isOpen[id] = !isOpen[id]
               redraw($)
             }}
           >
-            <Text color={color} dimColor={!open}>
-              ▌{' '}
-              <Text bold>{title}</Text>
+            <Text color={color} dimColor={!open} bold>
+              {title}
             </Text>
           </Button>
           <Text>{'  '}</Text>
@@ -386,18 +403,18 @@ export const register: Register = on => {
             </Text>
           ))}
           <Text>{pad}</Text>
-          {tools[id].map(t =>
+          {tools[id].flatMap(t => [
+            <Text> </Text>,
             t.active === undefined ? (
-              <Button key={t.key} plain dimColor={t.dim} label={` ${t.label}`} onPress={t.press} />
+              <Button key={t.key} plain dimColor={t.dim} label={t.label} onPress={t.press} />
             ) : (
-              <Button key={t.key} plain label={` ${t.label}`} onPress={t.press}>
-                <Text> </Text>
+              <Button key={t.key} plain label={t.label} onPress={t.press}>
                 <Text color={t.active ? color : undefined} dimColor={!t.active} bold={t.active} underline={t.active}>
                   {t.label}
                 </Text>
               </Button>
             ),
-          )}
+          ])}
         </Box>
       )
       if (!open) return [titleRow]

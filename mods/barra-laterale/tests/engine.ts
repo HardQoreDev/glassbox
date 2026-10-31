@@ -45,6 +45,10 @@ const usage = (input: number, cached: number, output: number) => ({
   model: 'claude-opus-5-5',
 })
 
+// Le variabili d'ambiente che il mod legge, e i comandi che lancia oltre a git.
+export const ENV: Record<string, string> = {}
+export const RUNS: string[][] = []
+
 // Il contenuto dei file come lo legge $.fs.read, e le scritture in attesa che
 // uno strumento applica quando gira.
 export const FILES: Record<string, string> = {}
@@ -72,7 +76,11 @@ export function fakeEngine(on: On, opened: string[] = []) {
   on('ui.invalidate', () => ({ value: undefined }))
   on('ui.log', () => ({ value: undefined }))
   on('fs.list', (_, e) => ({ value: DIRS[String((e as { path?: string }).path)] ?? [] }) as never)
+  on('env.get', (_, e) => ({ value: ENV[e.name] }) as never)
   on('process.run', (_, e) => {
+    if (e.argv[0] !== 'git') RUNS.push([...e.argv])
+    if (e.argv[0] === 'wslpath') return ok(`\\\\wsl.localhost\\Ubuntu${String(e.argv[2]).replaceAll('/', '\\')}\n`)
+    if (e.argv[0] === 'uname') return ok('Linux\n')
     const args = e.argv.join(' ')
     if (args.includes('rev-parse')) return ok('/r\n')
     if (args.includes(' remote')) return ok('origin\n')

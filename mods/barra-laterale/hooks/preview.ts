@@ -22,8 +22,12 @@ export const preview = {
   // La prima riga mostrata, e la prima colonna: lo slider sposta il testo di lato.
   offset: 0,
   left: 0,
-  // La riga più lunga, in colonne.
+  // Le colonne di ogni riga, e la più lunga.
+  widths: [] as number[],
   width: 0,
+  // Le righe lunghe vanno a capo invece di passare sotto lo slider; resta
+  // com'è da un file all'altro.
+  wrap: false,
   // Il testo dell'ultimo confronto: senza cambi non se ne fa un altro.
   text: undefined as string | null | undefined,
 }
@@ -144,6 +148,36 @@ export function hunkOf(rows: readonly DiffRow[], from: number, to: number, left 
   return [head, ...part.map(r => r.op + shown(r.text))].join('\n')
 }
 
+/**
+ * Le righe di schermo della riga `i` a capo in `visible` colonne, parola per
+ * parola e spezzando le parole più lunghe della riga. Una stima per eccesso:
+ * il disegno è di Code, e così la fine del file resta sempre raggiungibile.
+ */
+export function rowsOf(i: number, visible: number): number {
+  const row = preview.rows[i]
+  if (!row || (preview.widths[i] ?? 0) <= visible) return 1
+  let rows = 1
+  let col = 0
+  clean(row.text)
+    .split(' ')
+    .forEach((word, k) => {
+      let w = len(word)
+      if (k > 0) {
+        if (col + 1 + w <= visible) {
+          col += 1 + w
+          return
+        }
+        rows++
+      }
+      while (w > visible) {
+        rows++
+        w -= visible
+      }
+      col = w
+    })
+  return rows
+}
+
 /** Rifà il confronto se il file è cambiato; `true` se l'anteprima è cambiata. */
 export async function refreshPreview($: EngineInterface): Promise<boolean> {
   const t = touched.get(preview.path)
@@ -155,13 +189,14 @@ export async function refreshPreview($: EngineInterface): Promise<boolean> {
   preview.rows = diffLines(t.original ?? '', text ?? '')
   preview.added = preview.rows.filter(r => r.op === '+').length
   preview.removed = preview.rows.filter(r => r.op === '-').length
-  preview.width = preview.rows.reduce((w, r) => Math.max(w, len(clean(r.text))), 0)
+  preview.widths = preview.rows.map(r => len(clean(r.text)))
+  preview.width = preview.widths.reduce((w, n) => Math.max(w, n), 0)
   return true
 }
 
 /** Apre l'anteprima di `path` poco sopra la prima modifica. */
 export async function openPreview($: EngineInterface, path: string): Promise<void> {
-  Object.assign(preview, { path, rows: [], added: 0, removed: 0, isGone: false, offset: 0, left: 0, width: 0, text: undefined })
+  Object.assign(preview, { path, rows: [], added: 0, removed: 0, isGone: false, offset: 0, left: 0, widths: [], width: 0, text: undefined })
   await refreshPreview($)
   const first = preview.rows.findIndex(r => r.op !== ' ')
   preview.offset = Math.max(0, first - ABOVE)

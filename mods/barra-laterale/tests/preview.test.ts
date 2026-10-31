@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { diffLines, hunkOf } from '../hooks/preview'
+import { diffLines, hunkOf, preview, rowsOf } from '../hooks/preview'
 
 const ops = (before: string, after: string) => diffLines(before, after).map(r => r.op + r.text)
 
@@ -52,5 +52,20 @@ describe('hunkOf', () => {
     const rows = diffLines('', 'x\r\n\tdentro\x1b[0m\n')
     expect(hunkOf(rows, 0, 2)).toBe('@@ -0,0 +1,2 @@\n+x\n+    dentro\ufffd[0m')
     expect(hunkOf(diffLines('', 'ab\tc\n'), 0, 1)).toBe('@@ -0,0 +1,1 @@\n+ab  c')
+  })
+})
+
+describe('rowsOf', () => {
+  test('le righe di schermo di una riga a capo, parola per parola', () => {
+    preview.rows = diffLines('', `corta\naaaa bbbb cccc dddd\n${'x'.repeat(25)}\n    ab cd ef\n`)
+    preview.widths = preview.rows.map(r => r.text.length)
+    expect(rowsOf(0, 10)).toBe(1)
+    // `aaaa bbbb` e `cccc dddd`, ognuna nella sua riga
+    expect(rowsOf(1, 10)).toBe(2)
+    // una parola più lunga della riga si spezza
+    expect(rowsOf(2, 10)).toBe(3)
+    // il rientro conta: `    ab cd` e `ef`
+    expect(rowsOf(3, 10)).toBe(2)
+    expect(rowsOf(9, 10)).toBe(1)
   })
 })

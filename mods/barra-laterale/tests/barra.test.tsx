@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { FILES, PANE, PENDING, fakeEngine, oneTurn, settle, start } from './engine'
+import { ENV, FILES, PANE, PENDING, RUNS, fakeEngine, oneTurn, settle, start } from './engine'
 
 describe('la barra', () => {
   for (const surface of ['terminal', 'desktop'] as const) {
@@ -183,6 +183,81 @@ describe('la barra', () => {
       await ui.unmount()
     })
   }
+
+  test('con wrap le righe lunghe vanno a capo, senza slider, fino in fondo al file', async ($, on) => {
+    fakeEngine(on)
+    const long = (i: number) => `${i}`.padEnd(120, String.fromCharCode(97 + (i % 26)))
+    const lines = Array.from({ length: 40 }, (_, i) => long(i))
+    FILES['/r/src/app.ts'] = 'uno\n'
+    PENDING['/r/src/app.ts'] = `uno\n${lines.join('\n')}\n`
+    await start($)
+    await $.tool.call({ tool: 'Write', file_path: '/r/src/app.ts', content: '' } as never)
+    await settle()
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'touched:/r/src/app.ts' })
+    await settle()
+    await ui.redraw()
+    expect(await ui.find({ key: 'preview-right' })).toBeDefined()
+
+    await ui.press({ key: 'preview-wrap' })
+    await ui.redraw()
+    const code = async () => (await ui.find({ type: 'Code' }))?.props as { source: string; wrap: string }
+    expect((await code()).wrap).toBe('wrap')
+    expect(await ui.find({ key: 'preview-right' })).toBeUndefined()
+    // 28 righe di schermo: `uno`, poi nove righe da tre (53 colonne di testo)
+    expect((await code()).source).toBe(`@@ -1,1 +1,10 @@\n uno\n${lines.slice(0, 9).map(l => `+${l}`).join('\n')}`)
+
+    // In fondo le ultime righe entrano intere.
+    await $.ui.scroll({ component: 'Pane', requestId: 'barra-laterale', offset: 0, by: 100, bodyRows: 30, contentRows: 30, origin: { kind: 'person' } })
+    await ui.redraw()
+    expect((await code()).source).toBe(`@@ -1,0 +33,9 @@\n${lines.slice(31).map(l => `+${l}`).join('\n')}`)
+
+    // wrap resta acceso da un file all'altro, finché non si spegne.
+    await ui.press({ key: 'preview-close' })
+    await ui.redraw()
+    await ui.press({ key: 'touched:/r/src/app.ts' })
+    await settle()
+    await ui.redraw()
+    expect((await code()).wrap).toBe('wrap')
+    await ui.press({ key: 'preview-wrap' })
+    await ui.redraw()
+    expect((await code()).wrap).toBe('truncate-end')
+    await ui.unmount()
+  })
+
+  test("l'icona accanto a un file modificato lo apre con l'applicazione del sistema", async ($, on) => {
+    fakeEngine(on)
+    FILES['/r/notes.md'] = '# Note\n'
+    PENDING['/r/notes.md'] = '# Note\n\nAltro.\n'
+    await start($)
+    await $.tool.call({ tool: 'Edit', file_path: '/r/notes.md' } as never)
+    await settle()
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    RUNS.length = 0
+
+    // In WSL con explorer.exe, che apre il file con l'applicazione di Windows.
+    ENV.WSL_DISTRO_NAME = 'Ubuntu'
+    await ui.press({ key: 'open:/r/notes.md' })
+    await settle()
+    expect(RUNS).toEqual([
+      ['wslpath', '-w', '/r/notes.md'],
+      ['explorer.exe', '\\\\wsl.localhost\\Ubuntu\\r\\notes.md'],
+    ])
+    // L'anteprima non si apre: l'icona apre solo il file fuori.
+    await ui.redraw()
+    expect(await ui.find({ type: 'Code' })).toBeUndefined()
+
+    // Su Linux con xdg-open.
+    delete ENV.WSL_DISTRO_NAME
+    RUNS.length = 0
+    await ui.press({ key: 'open:/r/notes.md' })
+    await settle()
+    expect(RUNS).toEqual([
+      ['uname', '-s'],
+      ['xdg-open', '/r/notes.md'],
+    ])
+    await ui.unmount()
+  })
 
   test('una riga troppo larga si legge con lo slider', async ($, on) => {
     fakeEngine(on)

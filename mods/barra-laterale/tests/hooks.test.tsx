@@ -35,7 +35,7 @@ describe('la sezione HOOK', () => {
     expect(await ui.find({ type: 'Text', text: /herdr-agent-state\.sh/ })).toBeDefined()
     // a 60 colonne il matcher si accorcia con …
     expect(await ui.find({ type: 'Text', text: /PreToolUse · Write\|Edit/ })).toBeDefined()
-    expect((await ui.find({ key: 'hook:0' }))?.text).toBe('  ON ')
+    expect((await ui.find({ key: 'hook:0' }))?.text).toBe(' ON ')
     expect(await ui.find({ type: 'Text', text: /2 on/ })).toBeDefined()
     await ui.unmount()
   })

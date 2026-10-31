@@ -54,7 +54,11 @@ export const touchedInfo = (): Seg[] => {
  * La vista principale: un file per riga, dal più recente; la cartella in
  * grigio, il nome in chiaro, a destra le righe inserite e cancellate.
  */
-export function touchedLines(width: number, now: number, press: (t: Touched) => void): Line[] {
+// Il pulsante in fondo a ogni file modificato, che lo apre fuori; lo spazio
+// davanti sta fuori dal pulsante, che il motore inverte per intero.
+const OPEN = '↗'
+
+export function touchedLines(width: number, now: number, press: (t: Touched) => void, open: (t: Touched) => void): Line[] {
   const list = touchedList()
   if (list.length === 0) return [el => <el.Text dimColor>{fit('No files changed in this session yet.', width)}</el.Text>]
 
@@ -64,11 +68,11 @@ export function touchedLines(width: number, now: number, press: (t: Touched) => 
     const name = rel.slice(cut + 1)
     const plus = ` +${t.added}`
     const minus = ` −${t.removed}`
-    const room = Math.max(4, width - 2 - len(plus) - len(minus) - 1)
+    const room = Math.max(4, width - 2 - len(plus) - len(minus) - 1 - len(OPEN) - 1)
     const shownName = fit(name, room)
     const dirRoom = room - len(shownName)
     const dir = cut < 0 || dirRoom < 3 ? '' : len(rel.slice(0, cut + 1)) <= dirRoom ? rel.slice(0, cut + 1) : `…${rel.slice(0, cut + 1).slice(-(dirRoom - 1))}`
-    const pad = ' '.repeat(Math.max(0, width - 2 - len(dir) - len(shownName) - len(plus) - len(minus)))
+    const pad = ' '.repeat(Math.max(0, width - 2 - len(dir) - len(shownName) - len(plus) - len(minus) - 1 - len(OPEN)))
     const flash = tree.flash.get(t.path)
     const lit = flash !== undefined && flash.until > now ? TONES[flash.tone] : undefined
     const mark = t.isNew ? '+ ' : '● '
@@ -89,6 +93,10 @@ export function touchedLines(width: number, now: number, press: (t: Touched) => 
         <el.Text color={DEL_COLOR} dimColor={t.removed === 0}>
           {minus}
         </el.Text>
+        <el.Text> </el.Text>
+        <el.Button key={`open:${t.path}`} plain dimColor label={`Open ${name}`} onPress={() => open(t)}>
+          <el.Text dimColor>{OPEN}</el.Text>
+        </el.Button>
       </el.Box>
     )
   })
@@ -130,8 +138,8 @@ export function fileLines(width: number, now: number, rows: FileRow[], press: (r
 
     return el => (
       <el.Box key={`f:${n.id}`} flexDirection="row" height={1} overflow="hidden" backgroundColor={isSelected ? SELECTED_BG : undefined}>
+        <el.Text>{indent}</el.Text>
         <el.Button key={`file:${n.id}`} plain label={n.name} onPress={() => press(r)}>
-          <el.Text>{indent}</el.Text>
           <el.Text dimColor>{caret}</el.Text>
           <el.Text color={iconColor} dimColor={iconColor === undefined}>
             {glyph}{' '}
