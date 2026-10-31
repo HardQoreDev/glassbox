@@ -1,13 +1,14 @@
 // Una barra a destra divisa in quattro: in cima gli hook delle impostazioni,
-// da spegnere e riaccendere; poi il grafo dei branch come in VS Code, i file
-// (quelli modificati nella sessione, o l'albero come in filetree) e i turni
-// come in turn-inspector. Ogni sezione ha la sua barretta colorata, si chiude
-// dal titolo e scorre con la rotella sotto il puntatore; le altre si prendono
-// lo spazio.
+// da spegnere e riaccendere; poi il grafo dei branch come in VS Code (o i soli
+// rami), i file (quelli modificati nella sessione, o l'albero come in
+// filetree) e i turni come in turn-inspector. Ogni sezione ha la sua barretta
+// colorata, si chiude dal titolo e scorre con la rotella sotto il puntatore;
+// le altre si prendono lo spazio.
 import type { EngineInterface, Register, RenderElement, ToolCallInput } from 'claude-code'
 
-import { FLASH_MS, refreshDirs, reveal, toggleDir, touch, tree, visibleRows } from './files'
+import { FLASH_MS, readText, refreshDirs, reveal, toggleDir, touch, tree, visibleRows } from './files'
 import type { FileRow, Tone } from './files'
+import { closePreview, openPreview, preview, refreshPreview } from './preview'
 import { refreshRepo } from './repo'
 import { GLOW_MS, hooks, loadHooks, matches, subjectOf } from './settings-hooks'
 import type { Glow, SettingsHook } from './settings-hooks'
@@ -17,8 +18,10 @@ import { fit, len, redraw } from './ui'
 import type { Els, Line } from './ui'
 import { join } from './vendor/filetree'
 import { fileLines, filesInfo, touchedInfo, touchedLines } from './view-files'
-import { graph, graphInfo, graphLines } from './view-graph'
+import { branchLines, graph, graphInfo, graphLines } from './view-graph'
 import { hookLines, hooksInfo } from './view-hooks'
+import { previewLayout, previewLines } from './view-preview'
+import type { PreviewLayout } from './view-preview'
 import { INPUT_RAIL, turnLines, turnsInfo } from './view-turns'
 
 const PANE = 'barra-laterale'
@@ -33,13 +36,18 @@ const EVERY_MS = 10_000
 const HOOK_ROWS = 6
 // Il rientro delle righe sotto il titolo, a destra della barretta.
 const INDENT = '  '
+// Le righe che un tic della rotella scorre nell'anteprima di un file, e le
+// colonne con il puntatore sopra lo slider.
+const PREVIEW_WHEEL = 3
+const SLIDER_WHEEL = 4
+const FILES_COLOR = '#f0b429'
 
 type SectionId = 'hooks' | 'graph' | 'files' | 'turns'
 // Ogni sezione ha il suo colore: la barretta, il titolo, la riga sotto, lo scorrimento.
 const SECTIONS: { id: SectionId; title: string; color: string }[] = [
   { id: 'hooks', title: 'HOOKS', color: '#4ade80' },
   { id: 'graph', title: 'BRANCHES', color: '#59a4f9' },
-  { id: 'files', title: 'FILES', color: '#f0b429' },
+  { id: 'files', title: 'FILES', color: FILES_COLOR },
   { id: 'turns', title: 'TURNS', color: INPUT_RAIL },
 ]
 
@@ -54,6 +62,11 @@ const offset: Record<SectionId, number> = { hooks: 0, graph: 0, files: 0, turns:
 let spans: { id: SectionId; from: number; to: number; max: number }[] = []
 // La vista della sezione FILE: i file modificati nella sessione, o l'albero.
 let filesView: 'touched' | 'tree' = 'touched'
+// La vista dei BRANCHES: ogni commit, o i soli rami.
+let graphView: 'full' | 'graph' = 'full'
+// Come era disposta l'anteprima di un file all'ultimo disegno: fin dove
+// scorre, e in che riga è lo slider.
+let previewAt: PreviewLayout | undefined
 
 const READS = new Set(['Read', 'Grep', 'Glob', 'NotebookRead', 'LS'])
 const WRITES = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit'])
@@ -62,7 +75,8 @@ async function refreshAll($: EngineInterface): Promise<void> {
   const hooksChanged = await loadHooks($)
   const repoChanged = await refreshRepo($)
   const dirsChanged = await refreshDirs($)
-  if (hooksChanged || repoChanged || dirsChanged) redraw($)
+  const previewChanged = await refreshPreview($)
+  if (hooksChanged || repoChanged || dirsChanged || previewChanged) redraw($)
 }
 
 // Accende gli hook appena scattati del colore di come è andata, e ridisegna
@@ -82,14 +96,6 @@ async function pathOf($: EngineInterface, e: ToolCallInput): Promise<string | un
   return path.startsWith('/') ? path : join(await $.session.cwd(), path)
 }
 
-// Il testo di un file, o null se non esiste o non si legge.
-async function readText($: EngineInterface, path: string): Promise<string | null> {
-  return $.fs.read(path).then(
-    text => (typeof text === 'string' ? text : null),
-    () => null,
-  )
-}
-
 // Fuori dal giro dello strumento, così il suo esito arriva subito al modello
 // e un errore qui non lo tocca. `before` è il file prima di una scrittura.
 async function showActivity($: EngineInterface, e: ToolCallInput, isOk: boolean, before?: string | null): Promise<void> {
@@ -99,6 +105,8 @@ async function showActivity($: EngineInterface, e: ToolCallInput, isOk: boolean,
     if (tone === 'orange' && path && isOk && before !== undefined) {
       const after = await readText($, path)
       if (after !== null && after !== before) record(path, before, after, Date.now())
+      // L'anteprima aperta su questo file si aggiorna subito, senza aspettare git.
+      if (path === preview.path && (await refreshPreview($))) redraw($)
     }
     if (tone && path && (await touch($, path, tone))) {
       redraw($)
@@ -190,6 +198,12 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    if (preview.path) {
+      if (previewAt && e.pointer?.row === previewAt.sliderRow) preview.left = clamp(preview.left + e.by * SLIDER_WHEEL, previewAt.maxLeft)
+      else preview.offset = clamp(preview.offset + e.by * (e.pointer ? PREVIEW_WHEEL : 1), previewAt?.maxTop ?? 0)
+      redraw($)
+      return {}
+    }
     const row = e.pointer?.row
     const span =
       (row === undefined ? undefined : spans.find(s => row >= s.from && row < s.to)) ??
@@ -226,6 +240,39 @@ export const register: Register = on => {
       filesView = view
       redraw($)
     }
+    const showGraph = (view: 'full' | 'graph') => {
+      if (graphView !== view) offset.graph = 0
+      graphView = view
+      redraw($)
+    }
+    const selectCommit = (hash: string) => {
+      graph.selected = graph.selected === hash ? '' : hash
+      redraw($)
+    }
+
+    // L'anteprima di un file prende il posto di tutte le sezioni.
+    if (preview.path) {
+      const layout = previewLayout(width, bodyRows)
+      previewAt = layout
+      preview.offset = clamp(preview.offset, layout.maxTop)
+      preview.left = clamp(preview.left, layout.maxLeft)
+      const slide = (left: number) => {
+        preview.left = clamp(left, layout.maxLeft)
+        redraw($)
+      }
+      const back = () => {
+        closePreview()
+        redraw($)
+      }
+      const showInTree = () => {
+        const path = preview.path
+        closePreview()
+        showView('tree')
+        void reveal($, path).then(() => redraw($))
+      }
+      return <Box flexDirection="column">{previewLines(el, width, layout, FILES_COLOR, back, showInTree, slide)}</Box>
+    }
+
     const content: Record<SectionId, () => Line[]> = {
       hooks: () =>
         hookLines(inner, now, hook => {
@@ -234,18 +281,11 @@ export const register: Register = on => {
           $.ui.toast(`${hook.label}: ${wasOff ? 'ON' : 'OFF'} for this session`)
           redraw($)
         }),
-      graph: () =>
-        graphLines(inner, now, hash => {
-          graph.selected = graph.selected === hash ? '' : hash
-          redraw($)
-        }),
+      graph: () => (graphView === 'graph' ? branchLines(inner, now, selectCommit) : graphLines(inner, now, selectCommit)),
       files: () =>
         filesView === 'tree'
           ? fileLines(inner, now, fileRows, pressFile)
-          : touchedLines(inner, now, t => {
-              showView('tree')
-              void reveal($, t.path).then(() => redraw($))
-            }),
+          : touchedLines(inner, now, t => void openPreview($, t.path).then(() => redraw($))),
       turns: () =>
         turnLines(inner, n => {
           if (turns.expanded.has(n)) turns.expanded.delete(n)
@@ -261,7 +301,11 @@ export const register: Register = on => {
     }
     const tools: Record<SectionId, Tool[]> = {
       hooks: [],
-      graph: [{ key: 'graph-refresh', label: '↻', dim: true, press: () => void refreshAll($) }],
+      graph: [
+        { key: 'graph-view-full', label: 'full', active: graphView === 'full', press: () => showGraph('full') },
+        { key: 'graph-view-graph', label: 'graph', active: graphView === 'graph', press: () => showGraph('graph') },
+        { key: 'graph-refresh', label: '↻', dim: true, press: () => void refreshAll($) },
+      ],
       files: [
         { key: 'files-view-touched', label: 'changed', active: filesView === 'touched', press: () => showView('touched') },
         { key: 'files-view-tree', label: 'tree', active: filesView === 'tree', press: () => showView('tree') },

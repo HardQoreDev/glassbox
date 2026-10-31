@@ -8,6 +8,9 @@ export type Touched = {
   removed: number
   // Il file non c'era prima della prima scrittura della sessione.
   isNew: boolean
+  // Il file prima della prima scrittura della sessione, null se non c'era:
+  // l'anteprima lo confronta con il file di adesso.
+  original: string | null
   // L'ultima scrittura, per mettere in cima i file toccati da poco.
   at: number
 }
@@ -18,7 +21,7 @@ export const touched = new Map<string, Touched>()
 // costa troppo e si passa a uno approssimato.
 const LCS_CELLS = 4_000_000
 
-const linesOf = (text: string): string[] => {
+export const linesOf = (text: string): string[] => {
   if (text === '') return []
   const lines = text.split('\n')
   if (lines.at(-1) === '') lines.pop()
@@ -79,6 +82,7 @@ export const record = (path: string, before: string | null, after: string, at: n
     added: (prev?.added ?? 0) + added,
     removed: (prev?.removed ?? 0) + removed,
     isNew: prev ? prev.isNew : before === null,
+    original: prev ? prev.original : before,
     at,
   })
 }

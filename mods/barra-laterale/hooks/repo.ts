@@ -3,7 +3,7 @@
 // ogni aggiornamento; il pannello si ridisegna solo se l'uscita è cambiata.
 import type { EngineInterface } from 'claude-code'
 
-import { LOG_ARGV, layout, parseLog } from './graph'
+import { LOG_ARGV, layout, parseLog, simplify } from './graph'
 import type { GraphRow } from './graph'
 import { parseGit, parseNumstat, relative, rollCounts, rollUp } from './vendor/filetree'
 import type { Branch } from './vendor/filetree'
@@ -16,6 +16,8 @@ export type Repo = {
   // `root` relativa a `top`, con la barra finale; '' quando coincidono.
   prefix: string
   rows: GraphRow[]
+  // Le righe della vista dei soli rami.
+  simple: GraphRow[]
   branch: Branch | null
   git: Record<string, string>
   ignored: Set<string>
@@ -30,6 +32,7 @@ export const repo: Repo = {
   top: '',
   prefix: '',
   rows: [],
+  simple: [],
   branch: null,
   git: {},
   ignored: new Set(),
@@ -56,7 +59,7 @@ async function load($: EngineInterface): Promise<boolean> {
   const top = await $.process.run(['git', '-C', repo.root, 'rev-parse', '--show-toplevel'], { timeoutMs: 10_000 })
   if (top.exitCode !== 0) {
     const changed = repo.top !== '' || last !== 'no repo'
-    Object.assign(repo, { top: '', prefix: '', rows: [], branch: null, git: {}, counts: {}, diff: {}, error: '' })
+    Object.assign(repo, { top: '', prefix: '', rows: [], simple: [], branch: null, git: {}, counts: {}, diff: {}, error: '' })
     last = 'no repo'
     return changed
   }
@@ -75,7 +78,9 @@ async function load($: EngineInterface): Promise<boolean> {
   last = raw
 
   const names = remotes.stdout.split('\n').filter(name => name !== '')
-  repo.rows = log.exitCode === 0 ? layout(parseLog(log.stdout, names)) : []
+  const commits = log.exitCode === 0 ? parseLog(log.stdout, names) : []
+  repo.rows = layout(commits)
+  repo.simple = layout(simplify(commits))
   repo.error = log.exitCode === 0 ? '' : log.stderr.trim().split('\n')[0] ?? ''
   const parsed = parseGit(status.stdout, repo.root, repo.prefix)
   repo.branch = parsed.branch

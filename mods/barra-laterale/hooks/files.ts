@@ -29,6 +29,14 @@ const SKIP = new Set(['.git'])
 // Il contenuto di ogni cartella letta l'ultima volta: senza cambi niente ridisegno.
 const seen = new Map<string, string>()
 
+/** Il testo di un file, o null se non esiste o non si legge. */
+export async function readText($: EngineInterface, path: string): Promise<string | null> {
+  return $.fs.read(path).then(
+    text => (typeof text === 'string' ? text : null),
+    () => null,
+  )
+}
+
 /** Rilegge una cartella; `true` se il suo contenuto è cambiato. */
 export async function listDir($: EngineInterface, dir: string): Promise<boolean> {
   const entries = await $.fs.list(dir).catch(() => null)
