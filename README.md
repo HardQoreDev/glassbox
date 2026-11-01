@@ -1,4 +1,4 @@
-# claude-code-mods
+# glassbox
 
 I mod di Claude Code di HardQoreDev. Un mod cambia l'interfaccia o il comportamento di Claude Code dall'interno: pannelli, pulsanti, comandi. Servono Claude Code 2.1.287 o successivo (provati con la 2.1.314).
 
@@ -53,15 +53,15 @@ La repo è privata: serve accesso all'organizzazione HardQoreDev su GitHub e git
 Al prompt di una sessione di Claude Code:
 
 ```
-/plugin install glassbox --marketplace HardQoreDev/claude-code-mods
-/plugin install copia-risposta --marketplace HardQoreDev/claude-code-mods
+/plugin install glassbox --marketplace HardQoreDev/glassbox
+/plugin install copia-risposta --marketplace HardQoreDev/glassbox
 ```
 
 Rispondi `y` per aggiungere il marketplace, poi scegli dove installare. Da una shell è lo stesso:
 
 ```bash
-claude plugin install glassbox --marketplace HardQoreDev/claude-code-mods
-claude plugin install copia-risposta --marketplace HardQoreDev/claude-code-mods
+claude plugin install glassbox --marketplace HardQoreDev/glassbox
+claude plugin install copia-risposta --marketplace HardQoreDev/glassbox
 ```
 
 Poi apri una nuova sessione. Per gli aggiornamenti: `claude plugin update glassbox` (e lo stesso per `copia-risposta`), poi `/reload-plugins`.
@@ -71,8 +71,8 @@ Se carichi già questi mod da una cartella con `CLAUDE_CODE_PLUGIN_DIRS`, non in
 ## Sviluppare
 
 ```bash
-git clone git@github.com:HardQoreDev/claude-code-mods.git
-cd claude-code-mods
+git clone git@github.com:HardQoreDev/glassbox.git
+cd glassbox
 claude --plugin-dir mods/glassbox      # una sessione con il mod caricato dalla cartella
 claude plugin validate mods/glassbox   # quello che Claude Code rifiuterebbe
 claude plugin test mods/glassbox       # i test in mods/glassbox/tests

@@ -3,7 +3,7 @@
 Claude Code as a glass box rather than a black box. Glassbox is a pane on the right of the session that shows what is going on around the agent: the hooks that run and a switch for each, the git branches in progress, the files the session changed and, request by request, what goes into the context, word for word, with the numbers and tips that help keep it lean.
 
 ```
-/plugin install glassbox --marketplace HardQoreDev/claude-code-mods
+/plugin install glassbox --marketplace HardQoreDev/glassbox
 ```
 
 The repository is private: you need access to the HardQoreDev organization on GitHub and git set up on your machine (SSH or `gh auth login`). Claude Code 2.1.287 or later.

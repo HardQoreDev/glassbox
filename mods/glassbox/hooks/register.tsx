@@ -26,6 +26,7 @@ import { fixedHooks, hookLines, hookView, hooksInfo } from './view-hooks'
 import { contextLayout, contextLines } from './view-context'
 import type { ContextLayout } from './view-context'
 import { previewLayout, previewLines } from './view-preview'
+import { titleLines } from './view-title'
 import type { PreviewLayout } from './view-preview'
 import { INPUT_RAIL, turnLines, turnsInfo } from './view-turns'
 
@@ -46,6 +47,8 @@ const INDENT = '  '
 const PREVIEW_WHEEL = 3
 const SLIDER_WHEEL = 4
 const FILES_COLOR = '#f0b429'
+// Sotto queste righe il titolo lascia il posto alle sezioni.
+const TITLE_MIN_ROWS = 20
 
 type SectionId = 'hooks' | 'graph' | 'files' | 'turns'
 // Ogni sezione ha il suo colore: la barretta, il titolo, la riga sotto, lo scorrimento.
@@ -72,6 +75,8 @@ let graphView: 'active' | 'full' = 'active'
 // Come era disposta l'anteprima di un file all'ultimo disegno: fin dove
 // scorre, e in che riga è lo slider.
 let previewAt: PreviewLayout | undefined
+// La versione del mod, dal suo plugin.json, per il titolo.
+let version = ''
 // Lo stesso per la finestra di un pezzo del contesto.
 let contextAt: ContextLayout | undefined
 
@@ -128,6 +133,10 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await startTurns($)
+    version = await $.fs
+      .read(`${$.plugin.root}/.claude-plugin/plugin.json`)
+      .then(text => String((JSON.parse(text) as { version?: unknown }).version ?? ''))
+      .catch(() => '')
     await $.command
       .register({
         name: COMMAND,
@@ -497,10 +506,12 @@ export const register: Register = on => {
     const headerRows = SECTIONS.reduce((n, s) => n + (isOpen[s.id] ? 2 : 1), 0)
     const hookRows = lines.hooks ? Math.min(HOOK_ROWS, lines.hooks.length) : 0
     const shared = SECTIONS.filter(s => isOpen[s.id] && s.id !== 'hooks')
-    const heights = share(Math.max(0, bodyRows - headerRows - hookRows), shared.length)
-    const out: RenderElement[] = []
+    // In cima il titolo, quando il pannello è alto abbastanza.
+    const title = bodyRows >= TITLE_MIN_ROWS ? titleLines(el, width, version) : []
+    const heights = share(Math.max(0, bodyRows - title.length - headerRows - hookRows), shared.length)
+    const out: RenderElement[] = [...title]
     const nextSpans: typeof spans = []
-    let row = 0
+    let row = title.length
     for (const s of SECTIONS) {
       const head = header(s.id, s.title, s.color)
       out.push(...head)

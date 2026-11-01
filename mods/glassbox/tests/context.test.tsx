@@ -40,7 +40,8 @@ async function twoSteps($: Engine) {
 }
 
 describe('quello che entra nel contesto', () => {
-  test('le voci della legenda aprono system, earlier, new e output dell’ultima richiesta', async ($, on) => {
+  // Una ventina di ridisegni: più dei 5 secondi di partenza.
+  test('le voci della legenda aprono system, earlier, new e output dell’ultima richiesta', { timeoutMs: 20_000 }, async ($, on) => {
     fakeEngine(on)
     await start($)
     await $.tool.describe({ tool: 'mcp__docs__search', description: 'Searches the docs.', isDeferred: true, provider: { plugin: 'engine', tier: 'core' } } as never)
