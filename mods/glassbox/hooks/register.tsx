@@ -1,11 +1,13 @@
-// Una barra a destra divisa in quattro: HOOKS, gli hook della sessione da
+// Glassbox: una barra a destra divisa in quattro: HOOKS, gli hook della sessione da
 // spegnere e riaccendere; GIT, i branch attivi appesi al principale (o il
 // grafo dei commit come in VS Code); FILES, quelli modificati nella sessione
-// (o l'albero come in filetree); CONTEXT, i turni come in turn-inspector.
+// (o l'albero come in filetree); CONTEXT, i turni come in turn-inspector, con
+// quello che entra nel contesto a un clic e la tendina delle statistiche.
 // Ogni sezione ha la sua barretta colorata, si chiude dal titolo e scorre con
 // la rotella sotto il puntatore; le altre si prendono lo spazio.
 import type { EngineInterface, Register, RenderElement, ToolCallInput } from 'claude-code'
 
+import { closeContext, doc, openContext, writeDoc } from './context'
 import { FLASH_MS, readText, refreshDirs, reveal, toggleDir, touch, tree, visibleRows } from './files'
 import type { FileRow, Tone } from './files'
 import { openFile } from './open'
@@ -21,13 +23,15 @@ import { fileLines, filesInfo, touchedInfo, touchedLines } from './view-files'
 import { branchLines, branchView } from './view-branches'
 import { graph, graphInfo, graphLines } from './view-graph'
 import { fixedHooks, hookLines, hookView, hooksInfo } from './view-hooks'
+import { contextLayout, contextLines } from './view-context'
+import type { ContextLayout } from './view-context'
 import { previewLayout, previewLines } from './view-preview'
 import type { PreviewLayout } from './view-preview'
 import { INPUT_RAIL, turnLines, turnsInfo } from './view-turns'
 
-const PANE = 'barra-laterale'
-const TITLE = 'Sidebar'
-const COMMAND = 'sidebar'
+const PANE = 'glassbox'
+const TITLE = 'Glassbox'
+const COMMAND = 'glassbox'
 // La larghezza chiesta per il pannello agganciato a destra; trascinarlo vince.
 const COLUMNS = 64
 // Ogni quanto si rilegge il repo, per i cambi fatti fuori da questa sessione.
@@ -68,6 +72,8 @@ let graphView: 'active' | 'full' = 'active'
 // Come era disposta l'anteprima di un file all'ultimo disegno: fin dove
 // scorre, e in che riga è lo slider.
 let previewAt: PreviewLayout | undefined
+// Lo stesso per la finestra di un pezzo del contesto.
+let contextAt: ContextLayout | undefined
 
 const READS = new Set(['Read', 'Grep', 'Glob', 'NotebookRead', 'LS'])
 const WRITES = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit'])
@@ -106,7 +112,7 @@ async function showActivity($: EngineInterface, e: ToolCallInput, isOk: boolean,
     }
     if (tone === 'orange' || e.tool === 'Bash') await refreshAll($)
   } catch (err) {
-    $.ui.log(`barra-laterale: activity not shown: ${err}`)
+    $.ui.log(`glassbox: activity not shown: ${err}`)
   }
 }
 
@@ -125,10 +131,10 @@ export const register: Register = on => {
     await $.command
       .register({
         name: COMMAND,
-        description: 'Opens the sidebar on the right: hooks, git, files and context (close)',
+        description: 'Opens Glassbox on the right: hooks, git, files and what goes into the context (close)',
         argumentHint: '[close]',
       })
-      .catch(err => $.ui.log(`barra-laterale: /${COMMAND} not registered: ${err}`))
+      .catch(err => $.ui.log(`glassbox: /${COMMAND} not registered: ${err}`))
     // La sessione parte subito; il pannello si riempie quando git ha risposto.
     // Trasparente: sotto la barra resta il fondo del terminale.
     void $.ui.open({ id: PANE, title: TITLE, columns: COLUMNS, backgroundColor: 'transparent' }).catch(() => undefined)
@@ -142,13 +148,13 @@ export const register: Register = on => {
     const arg = e.args.trim().toLowerCase()
     if (arg === 'close') {
       await $.ui.close({ id: PANE }).catch(() => undefined)
-      return { text: `Sidebar closed: /${COMMAND} reopens it.` }
+      return { text: `Glassbox closed: /${COMMAND} reopens it.` }
     }
 
     await refreshAll($)
     await $.ui.open({ id: PANE, title: TITLE, columns: COLUMNS, backgroundColor: 'transparent' })
     const hint = e.presentation.isFullscreen ? '' : ' It is above the prompt for now: /tui fullscreen docks it on the right.'
-    return { text: `Sidebar opened.${hint}` }
+    return { text: `Glassbox opened.${hint}` }
   })
 
   // I file che Claude legge (viola) o scrive (arancio) si accendono; di quelli
@@ -165,6 +171,12 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    if (doc.isOpen) {
+      if (contextAt && e.pointer?.row === contextAt.sliderRow) doc.left = clamp(doc.left + e.by * SLIDER_WHEEL, contextAt.maxLeft)
+      else doc.offset = clamp(doc.offset + e.by * (e.pointer ? PREVIEW_WHEEL : 1), contextAt?.maxTop ?? 0)
+      redraw($)
+      return {}
+    }
     if (preview.path) {
       if (previewAt && e.pointer?.row === previewAt.sliderRow) preview.left = clamp(preview.left + e.by * SLIDER_WHEEL, previewAt.maxLeft)
       else preview.offset = clamp(preview.offset + e.by * (e.pointer ? PREVIEW_WHEEL : 1), previewAt?.maxTop ?? 0)
@@ -215,6 +227,37 @@ export const register: Register = on => {
     const selectCommit = (hash: string) => {
       graph.selected = graph.selected === hash ? '' : hash
       redraw($)
+    }
+
+    // Un pezzo del contesto prende il posto di tutte le sezioni.
+    if (doc.isOpen) {
+      const layout = contextLayout(width, bodyRows)
+      contextAt = layout
+      doc.offset = clamp(doc.offset, layout.maxTop)
+      doc.left = clamp(doc.left, layout.maxLeft)
+      return (
+        <Box flexDirection="column">
+          {contextLines(el, width, layout, INPUT_RAIL, {
+            back: () => {
+              closeContext()
+              redraw($)
+            },
+            open: () =>
+              void writeDoc($)
+                .then(path => openFile($, path))
+                .catch(err => $.ui.toast(`Could not open ${doc.title}: ${err instanceof Error ? err.message : err}`)),
+            slide: left => {
+              doc.left = clamp(left, layout.maxLeft)
+              redraw($)
+            },
+            toggleWrap: () => {
+              doc.wrap = !doc.wrap
+              doc.offset = 0
+              redraw($)
+            },
+          })}
+        </Box>
+      )
     }
 
     // L'anteprima di un file prende il posto di tutte le sezioni.
@@ -287,11 +330,18 @@ export const register: Register = on => {
                 }),
             ),
       turns: () =>
-        turnLines(inner, n => {
-          if (turns.expanded.has(n)) turns.expanded.delete(n)
-          else turns.expanded.add(n)
-          redraw($)
-        }),
+        turnLines(
+          inner,
+          n => {
+            if (turns.expanded.has(n)) turns.expanded.delete(n)
+            else turns.expanded.add(n)
+            redraw($)
+          },
+          (t, part) =>
+            void openContext($, turns.ledger, t, part)
+              .then(() => redraw($))
+              .catch(err => $.ui.toast(`#${t.n} ${part}: not shown: ${err instanceof Error ? err.message : err}`)),
+        ),
     }
     const info: Record<SectionId, () => Seg[]> = {
       hooks: hooksInfo,
@@ -340,6 +390,18 @@ export const register: Register = on => {
         { key: 'files-refresh', label: '↻', dim: true, press: () => void refreshAll($) },
       ],
       turns: [
+        {
+          key: 'turns-stats',
+          label: 'stats',
+          active: turns.showStats,
+          press: () => {
+            turns.showStats = !turns.showStats
+            // Aperta, la tendina sta in cima: la sezione smette di seguire l'ultimo turno.
+            turns.follow = !turns.showStats
+            offset.turns = 0
+            redraw($)
+          },
+        },
         {
           key: 'turns-follow',
           label: '⤓',

@@ -1,8 +1,14 @@
 // La sezione in basso: il disegno di turn-inspector (claude-code-templates,
 // hooks/turn-inspector.tsx) spezzato in righe, perché la sezione ne mostra
-// solo quante ne stanno. Input in viola, output in grigio.
+// solo quante ne stanno. Input in viola, output in grigio. Le voci della
+// legenda e i blocchi di un turno aperto aprono quello che entra nel
+// contesto; la tendina `stats` mostra in cima i numeri e i consigli.
+import { partOf } from './context'
+import type { Part } from './context'
+import { statsOf } from './stats'
+import type { Level, Share } from './stats'
 import { turns } from './turns-state'
-import { cell, fit, len } from './ui'
+import { cell, fit, len, wrapText } from './ui'
 import type { Line } from './ui'
 import { barCells, contextAfter, fmtTokens, gist, inputStack } from './vendor/turns'
 import type { Block, BlockKind, Turn } from './vendor/turns'
@@ -21,6 +27,16 @@ const STYLE: Record<BlockKind, { icon: string; bg: string; fg: string }> = {
 export const INPUT_RAIL = '#a78bfa'
 const OUTPUT_RAIL = '#8c8c8c'
 const BAR = { system: '#2e1f4d', history: '#5b3fa0', added: '#a78bfa', output: '#9a9a9a', free: '#3a3a3a' }
+// Le voci della legenda: il pezzo del contesto che aprono e il loro colore.
+const LEGEND: [Part, string][] = [
+  ['system', BAR.system],
+  ['earlier', BAR.history],
+  ['new', BAR.added],
+  ['output', BAR.output],
+]
+const LEVEL = { warn: { mark: '! ', color: '#ffb000' }, info: { mark: '· ', color: '#59a4f9' }, good: { mark: '✓ ', color: '#4ade80' } } satisfies Record<Level, unknown>
+// La colonna dei nomi nella tendina.
+const LABEL_W = 12
 
 /** Il testo accanto al titolo: quanto contesto è in uso, e la percentuale. */
 export const turnsInfo = (): { text: string; color?: string; dim?: boolean }[] => {
@@ -34,7 +50,67 @@ export const turnsInfo = (): { text: string; color?: string; dim?: boolean }[] =
   ]
 }
 
-export function turnLines(width: number, toggle: (n: number) => void): Line[] {
+/** La tendina: i numeri della sessione, il contesto per categoria, gli strumenti, i consigli. */
+export function statsLines(width: number): Line[] {
+  const s = statsOf(turns.ledger, turns.calls, turns.breakdown)
+  const lines: Line[] = []
+  const title = (text: string): Line => el => (
+    <el.Text color={INPUT_RAIL} bold>
+      {fit(text, width)}
+    </el.Text>
+  )
+  for (const r of s.rows) {
+    const value = fit(r.value, Math.max(4, width - LABEL_W))
+    lines.push(el => (
+      <el.Box key={`s:${r.label}`} flexDirection="row" height={1} overflow="hidden">
+        <el.Text dimColor>{cell(r.label, LABEL_W)}</el.Text>
+        <el.Text color={r.level && r.level !== 'good' ? LEVEL[r.level].color : undefined}>{value}</el.Text>
+      </el.Box>
+    ))
+  }
+  // Una riga per voce: il nome, una barra lunga quanto pesa, il valore.
+  const shares = (list: readonly Share[], of: number, value: (x: Share) => string, size: (x: Share) => number, color: string) => {
+    const barW = Math.max(4, Math.min(16, width - LABEL_W - 14))
+    for (const x of list) {
+      const filled = of > 0 ? Math.max(1, Math.round((size(x) / of) * barW)) : 0
+      const text = fit(` ${value(x)}`, Math.max(4, width - LABEL_W - barW))
+      lines.push(el => (
+        <el.Box key={`s:${x.name}`} flexDirection="row" height={1} overflow="hidden">
+          <el.Text>{`${cell(x.name, LABEL_W - 1)} `}</el.Text>
+          <el.Text color={color}>{'█'.repeat(Math.min(barW, filled))}</el.Text>
+          <el.Text color={BAR.free}>{'░'.repeat(Math.max(0, barW - filled))}</el.Text>
+          <el.Text dimColor>{text}</el.Text>
+        </el.Box>
+      ))
+    }
+  }
+  const window = turns.breakdown?.rawMaxTokens ?? turns.ledger.window ?? 0
+  if (s.categories.length > 0) {
+    lines.push(title('by category'))
+    shares(s.categories, window, x => fmtTokens(x.tokens), x => x.tokens, BAR.history)
+  }
+  if (s.tools.length > 0) {
+    lines.push(title('most used tools · calls · tokens in context'))
+    const most = Math.max(...s.tools.map(x => x.count ?? 0))
+    shares(s.tools, most, x => `${x.count}${x.failed ? ` (${x.failed}✗)` : ''}${x.tokens > 0 ? ` · ${fmtTokens(x.tokens)}` : ''}`, x => x.count ?? 0, BAR.added)
+  }
+  lines.push(title('tips'))
+  for (const tip of s.tips) {
+    const { mark, color } = LEVEL[tip.level]
+    wrapText(tip.text, Math.max(8, width - 2)).forEach((text, i) => {
+      lines.push(el => (
+        <el.Box flexDirection="row" height={1} overflow="hidden">
+          <el.Text color={color}>{i === 0 ? mark : '  '}</el.Text>
+          <el.Text>{text}</el.Text>
+        </el.Box>
+      ))
+    })
+  }
+  lines.push(el => <el.Text color={INPUT_RAIL} dimColor>{'─'.repeat(width)}</el.Text>)
+  return lines
+}
+
+export function turnLines(width: number, toggle: (n: number) => void, show: (t: Turn, part: Part) => void): Line[] {
   const l = turns.ledger
   const window = l.window
 
@@ -50,7 +126,10 @@ export function turnLines(width: number, toggle: (n: number) => void): Line[] {
   }
 
   const lastDone = [...l.turns].reverse().find(t => t.input !== undefined)
+  const legendW = LEGEND.reduce((w, [part], i) => w + (i ? 2 : 0) + 2 + len(part), 0)
+  const which = lastDone ? `#${lastDone.n}` : ''
   const lines: Line[] = [
+    ...(turns.showStats ? statsLines(width) : []),
     el => (
       <el.Text>
         {bar(lastDone, width).map(s => (
@@ -58,17 +137,21 @@ export function turnLines(width: number, toggle: (n: number) => void): Line[] {
         ))}
       </el.Text>
     ),
+    // Le voci aprono quello che entra nel contesto della richiesta della barra.
     el => (
-      <el.Text>
-        <el.Text color={BAR.system}>■</el.Text>
-        <el.Text dimColor> system  </el.Text>
-        <el.Text color={BAR.history}>■</el.Text>
-        <el.Text dimColor> earlier  </el.Text>
-        <el.Text color={BAR.added}>■</el.Text>
-        <el.Text dimColor> new  </el.Text>
-        <el.Text color={BAR.output}>■</el.Text>
-        <el.Text dimColor> output</el.Text>
-      </el.Text>
+      <el.Box key="legend" flexDirection="row" height={1} overflow="hidden">
+        {LEGEND.flatMap(([part, color], i) => [
+          <el.Text color={color}>{`${i ? '  ' : ''}■ `}</el.Text>,
+          lastDone ? (
+            <el.Button key={`context:${part}`} plain label={`${part} of #${lastDone.n}`} onPress={() => show(lastDone, part)}>
+              <el.Text dimColor>{part}</el.Text>
+            </el.Button>
+          ) : (
+            <el.Text dimColor>{part}</el.Text>
+          ),
+        ])}
+        <el.Text dimColor>{`${' '.repeat(Math.max(1, width - legendW - len(which)))}${which}`}</el.Text>
+      </el.Box>
     ),
   ]
 
@@ -77,18 +160,21 @@ export function turnLines(width: number, toggle: (n: number) => void): Line[] {
     return lines
   }
 
-  const chip = (b: Block, w: number, rail: string): Line => {
+  // Un blocco del turno: un clic apre il suo pezzo del contesto.
+  const chip = (t: Turn, b: Block, key: string, w: number, rail: string): Line => {
     const s = STYLE[b.kind]
     const tok = b.kind === 'truncated' ? '' : `${b.isEstimate ? '~' : ''}${fmtTokens(b.tokens)}`
     const labelW = Math.max(4, w - tok.length - 5)
     const text = cell(` ${s.icon} ${cell(b.label, labelW)} ${tok} `, w)
     return el => (
-      <el.Text>
+      <el.Box key={`${key}:row`} flexDirection="row" height={1} overflow="hidden">
         <el.Text color={rail}>{'  ┃ '}</el.Text>
-        <el.Text backgroundColor={s.bg} color={b.isError ? '#ff8f80' : s.fg} italic={b.kind === 'truncated'}>
-          {text}
-        </el.Text>
-      </el.Text>
+        <el.Button key={key} plain label={`${b.label} of #${t.n}`} onPress={() => show(t, partOf(b.kind))}>
+          <el.Text backgroundColor={s.bg} color={b.isError ? '#ff8f80' : s.fg} italic={b.kind === 'truncated'}>
+            {text}
+          </el.Text>
+        </el.Button>
+      </el.Box>
     )
   }
 
@@ -141,14 +227,14 @@ export function turnLines(width: number, toggle: (n: number) => void): Line[] {
     const w = width - 4
     const cached = t.cacheRead ? ` · ${fmtTokens(t.cacheRead)} cached` : ''
     lines.push(title(t.input !== undefined ? `INPUT  ${fmtTokens(t.input)}${cached}` : 'INPUT  sending…', INPUT_RAIL))
-    for (const b of inputStack(l, t)) lines.push(chip(b, w, INPUT_RAIL))
+    inputStack(l, t).forEach((b, i) => lines.push(chip(t, b, `chip:${t.n}:in:${i}`, w, INPUT_RAIL)))
     lines.push(
       title(
         t.status === 'streaming' ? 'OUTPUT  streaming…' : t.output !== undefined ? `OUTPUT  +${fmtTokens(t.output)}` : 'OUTPUT  none',
         OUTPUT_RAIL,
       ),
     )
-    for (const b of t.answer) lines.push(chip(b, w, OUTPUT_RAIL))
+    t.answer.forEach((b, i) => lines.push(chip(t, b, `chip:${t.n}:out:${i}`, w, OUTPUT_RAIL)))
     const meta = [t.model, t.stopReason ?? '', t.isCompacted ? 'compacted before this turn' : ''].filter(Boolean).join(' · ')
     if (meta) lines.push(el => <el.Text dimColor>{fit(`    ${meta}`, width)}</el.Text>)
   }

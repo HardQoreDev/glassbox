@@ -1,0 +1,9 @@
+{
+  "name": "glassbox",
+  "version": "0.11.0",
+  "description": "Claude Code as a glass box: a pane on the right with the session's hooks to switch off, the active git branches, the files changed in the session, and what goes into the context of every request, with stats and tips to keep it lean",
+  "author": {
+    "name": "HardQoreDev"
+  },
+  "license": "MIT"
+}

@@ -2,8 +2,9 @@
 // (claude-code-templates, hooks/turn-inspector.tsx): ogni richiesta al modello
 // è un turno, con il suo input e il suo output. Gli hook osservano soltanto:
 // ogni evento passa avanti com'è.
-import type { EngineInterface, On, ToolCallInput, ToolCallResult } from 'claude-code'
+import type { EngineInterface, On, SessionContextBreakdown, ToolCallInput, ToolCallResult } from 'claude-code'
 
+import { pruneContext, recordChunk, recordSent, registerContext, resetContext } from './context'
 import { chunk, createLedger, promptStarted, stepEnded, stepStarted, systemTokens, toolAnswered } from './vendor/turns'
 import type { Ledger, Turn } from './vendor/turns'
 import { redraw } from './ui'
@@ -17,6 +18,12 @@ export const turns = {
   expanded: new Set<number>(),
   // Segue l'ultimo turno: la sezione resta in fondo finché non la scorri su.
   follow: true,
+  // La tendina delle statistiche in cima alla sezione.
+  showStats: false,
+  // Il contesto per categoria come lo divide /context, dopo l'ultimo turno.
+  breakdown: undefined as SessionContextBreakdown | undefined,
+  // Le chiamate agli strumenti della sessione, riuscite e fallite.
+  calls: new Map<string, { count: number; failed: number }>(),
 }
 
 const safeJson = (v: unknown): string => {
@@ -33,6 +40,9 @@ export async function startTurns($: EngineInterface): Promise<void> {
   turns.live = undefined
   turns.expanded.clear()
   turns.follow = true
+  turns.breakdown = undefined
+  turns.calls.clear()
+  resetContext()
   const usage = await $.session.usage().catch(() => undefined)
   if (usage) turns.ledger.window = usage.context.window
   // il primo turno di una sessione nuova misura quello che ogni richiesta porta con sé
@@ -43,10 +53,15 @@ export async function startTurns($: EngineInterface): Promise<void> {
 export const toolDone = (e: ToolCallInput, r: ToolCallResult): void => {
   if (e.agentId !== undefined) return
   const text = r.deny ?? r.text ?? (r.result === undefined ? '' : safeJson(r.result))
-  toolAnswered(turns.ledger, e.tool, text.length, r.deny !== undefined || r.isError === true)
+  const isFailed = r.deny !== undefined || r.isError === true
+  toolAnswered(turns.ledger, e.tool, text.length, isFailed)
+  const c = turns.calls.get(e.tool) ?? { count: 0, failed: 0 }
+  turns.calls.set(e.tool, { count: c.count + 1, failed: c.failed + (isFailed ? 1 : 0) })
 }
 
 export const registerTurns = (on: On): void => {
+  registerContext(on)
+
   on('turn.start', async ($, e, next) => {
     promptStarted(turns.ledger, e.turnId, e.text)
     return next(e)
@@ -57,10 +72,18 @@ export const registerTurns = (on: On): void => {
     if (e.agentId !== undefined) return yield* next(e)
     const turn = stepStarted(turns.ledger, e.turnId, e.index, e.model, KEEP)
     turns.live = turn
+    pruneContext(turns.ledger.turns[0]?.n ?? turn.n)
+    // I messaggi che la richiesta porta, letti mentre parte: la lettura non la
+    // ritarda, e quelli in più (la risposta, se arriva prima) restano fuori.
+    void $.session
+      .messages({ as: 'api' })
+      .then(m => recordSent(turn.n, e.messageCount > 0 && m.length > e.messageCount ? m.slice(0, e.messageCount) : m))
+      .catch(() => undefined)
     redraw($)
     const names = new Map<number, string>()
     const stream = next(e)
     for await (const c of stream) {
+      recordChunk(turn.n, c)
       let isNew = false
       if (c.kind === 'thinking') isNew = chunk(turn, c.index, 'thinking', c.text)
       else if (c.kind === 'text') isNew = chunk(turn, c.index, 'text', c.text)
@@ -84,6 +107,7 @@ export const registerTurns = (on: On): void => {
       const usage = await $.session.usage({ breakdown: 'summary', columns: COLUMNS }).catch(() => undefined)
       const system = systemTokens(usage?.context.breakdown?.categories ?? [])
       if (system !== undefined) turns.ledger.system = system
+      if (usage?.context.breakdown) turns.breakdown = usage.context.breakdown
       redraw($)
     }
     return r

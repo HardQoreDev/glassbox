@@ -2,7 +2,7 @@
 // cartelle e i suoi branch, due hook nelle impostazioni utente (uno con
 // hook-switch), due plugin con i loro hook, un modello che risponde.
 import type { Engine } from 'claude-code/testing'
-import type { FsEntry, On, ProcessRunResult } from 'claude-code'
+import type { FsEntry, On, ProcessRunResult, SessionContextBreakdown } from 'claude-code'
 
 const F = '\x1f'
 const R = '\x1e'
@@ -149,6 +149,15 @@ export const FILES: Record<string, string> = {
   '/r/.git/FETCH_HEAD': FETCH_HEAD,
 }
 export const PENDING: Record<string, string> = {}
+// I comandi che non partono, come `code` dove VS Code non c'è.
+export const MISSING = new Set<string>()
+
+// I messaggi che la prossima richiesta porta, in forma API.
+export const MESSAGES: { role: 'user' | 'assistant'; content: Record<string, unknown>[] }[] = []
+// Le risposte del modello finto, passo per passo; senza, «Fatto.».
+export const REPLIES: { chunks: Record<string, unknown>[]; usage: [number, number, number] }[] = []
+// Il contesto per categoria che /context darebbe; senza, nessuno.
+export const BREAKDOWN: { value?: Partial<SessionContextBreakdown> } = {}
 
 /** Lascia finire il lavoro che il mod fa fuori dal giro degli strumenti. */
 export async function settle(): Promise<void> {
@@ -164,9 +173,31 @@ export function fakeEngine(on: On, opened: string[] = []) {
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.root', () => ({ value: '/r' }))
   on('session.cwd', () => ({ value: '/r' }))
-  on('session.messages', () => ({ value: [] }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }) as never)
-  on('command.register', () => ({ value: { command: 'sidebar' } }))
+  on('session.messages', (_, e) => ({ value: (e as { as?: string }).as === 'api' ? [...MESSAGES] : [] }) as never)
+  on('session.usage', (_, e) => {
+    const breakdown = (e as { breakdown?: string }).breakdown && BREAKDOWN.value ? { breakdown: BREAKDOWN.value } : {}
+    return { value: { startedAt: 0, context: { window: 200_000, ...breakdown }, rateLimits: [] } } as never
+  })
+  on('session.id', () => ({ value: 's1' }))
+  on('prompt.compose', () => ({
+    sections: [
+      { id: 'intro', text: 'You are Claude Code.', scope: 'shared' as const },
+      { id: 'memory', text: '# CLAUDE.md\nRispondi in italiano.', scope: 'session' as const },
+    ],
+  }))
+  on('tool.list', () => ({
+    value: [
+      { name: 'Read', description: 'Reads a file.', mcp: false },
+      { name: 'mcp__docs__search', description: 'Searches the docs.', mcp: true },
+    ],
+  }))
+  on('tool.describe', (_, e) => ({ description: e.description, ...(e.isDeferred ? { isDeferred: true } : {}) }))
+  on('fs.write', (_, e) => {
+    const { path, text } = e as unknown as { path: string; text: string }
+    FILES[path] = text
+    return { value: undefined } as never
+  })
+  on('command.register', () => ({ value: { command: 'glassbox' } }))
   on('clock.every', () => ({ value: undefined }) as never)
   on('clock.after', () => ({ value: undefined }) as never)
   on('ui.open', (_, e) => {
@@ -184,6 +215,7 @@ export function fakeEngine(on: On, opened: string[] = []) {
   })
   on('process.run', (_, e) => {
     if (e.argv[0] !== 'git') RUNS.push([...e.argv])
+    if (MISSING.has(String(e.argv[0]))) throw new Error(`${e.argv[0]}: command not found`)
     if (e.argv[0] === 'wslpath') return ok(`\\\\wsl.localhost\\Ubuntu${String(e.argv[2]).replaceAll('/', '\\')}\n`)
     if (e.argv[0] === 'uname') return ok('Linux\n')
     const args = e.argv.join(' ')
@@ -219,15 +251,22 @@ export function fakeEngine(on: On, opened: string[] = []) {
   on('turn.start', async (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', async (_, e) => ({ text: e.answer }))
   on('turn.step', async function* (_, e) {
-    yield { kind: 'text' as const, index: 0, text: 'Fatto.' }
-    return { turnId: e.turnId, index: e.index, answer: 'Fatto.', toolUses: [], stopReason: 'end_turn' as const, usage: usage(500, 14_000, 40) }
+    const reply = REPLIES.shift()
+    if (!reply) {
+      yield { kind: 'text' as const, index: 0, text: 'Fatto.' }
+      return { turnId: e.turnId, index: e.index, answer: 'Fatto.', toolUses: [], stopReason: 'end_turn' as const, usage: usage(500, 14_000, 40) }
+    }
+    for (const c of reply.chunks) yield c as never
+    const answer = reply.chunks.map(c => (c.kind === 'text' ? String(c.text) : '')).join('')
+    const isTool = reply.chunks.some(c => c.kind === 'tool')
+    return { turnId: e.turnId, index: e.index, answer, toolUses: [], stopReason: isTool ? ('tool_use' as const) : ('end_turn' as const), usage: usage(...reply.usage) }
   })
 }
 
 export const PANE = {
-  plugin: 'barra-laterale',
+  plugin: 'glassbox',
   component: 'Pane',
-  requestId: 'barra-laterale',
+  requestId: 'glassbox',
   props: {
     title: 'Barra',
     isFocused: false,
@@ -238,10 +277,10 @@ export const PANE = {
   },
 } as const
 
-// Il repo si legge dopo l'avvio, fuori dal suo giro: /sidebar aspetta quella lettura.
+// Il repo si legge dopo l'avvio, fuori dal suo giro: /glassbox aspetta quella lettura.
 export async function start($: Engine) {
   await $.session.start({ cwd: '/r', surface: 'terminal', isInteractive: true })
-  await $.command.run({ command: 'sidebar', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  await $.command.run({ command: 'glassbox', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
 }
 
 export async function oneTurn($: Engine) {

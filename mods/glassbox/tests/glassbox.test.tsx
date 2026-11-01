@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { ENV, FILES, PANE, PENDING, RUNS, fakeEngine, oneTurn, settle, start } from './engine'
+import { ENV, FILES, MISSING, PANE, PENDING, RUNS, fakeEngine, oneTurn, settle, start } from './engine'
 
 // Un pannello alto, perché i branch e i loro dettagli stiano tutti nella sezione.
 const TALL = { ...PANE, props: { ...PANE.props, scroll: { offset: 0, bodyRows: 80 } } }
@@ -11,7 +11,7 @@ describe('la barra', () => {
       const opened: string[] = []
       fakeEngine(on, opened)
       await start($)
-      expect(opened[0]).toBe('barra-laterale')
+      expect(opened[0]).toBe('glassbox')
       await oneTurn($)
 
       const ui = await $.ui.mount({ ...PANE, surface })
@@ -150,7 +150,7 @@ describe('la barra', () => {
     await ui.unmount()
   })
 
-  test('/sidebar close chiude la barra', async ($, on) => {
+  test('/glassbox close chiude la barra', async ($, on) => {
     fakeEngine(on, [])
     const closed: string[] = []
     on('ui.close', (_, e) => {
@@ -158,10 +158,10 @@ describe('la barra', () => {
       return { value: undefined }
     })
     const run = (args: string) =>
-      $.command.run({ command: 'sidebar', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+      $.command.run({ command: 'glassbox', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
 
-    expect((await run('close')).text).toBe('Sidebar closed: /sidebar reopens it.')
-    expect(closed).toEqual(['barra-laterale'])
+    expect((await run('close')).text).toBe('Glassbox closed: /glassbox reopens it.')
+    expect(closed).toEqual(['glassbox'])
   })
 
   test('la vista principale elenca i file modificati con le righe inserite e cancellate', async ($, on) => {
@@ -257,7 +257,7 @@ describe('la barra', () => {
     expect((await code()).source).toBe(`@@ -1,1 +1,10 @@\n uno\n${lines.slice(0, 9).map(l => `+${l}`).join('\n')}`)
 
     // In fondo le ultime righe entrano intere.
-    await $.ui.scroll({ component: 'Pane', requestId: 'barra-laterale', offset: 0, by: 100, bodyRows: 30, contentRows: 30, origin: { kind: 'person' } })
+    await $.ui.scroll({ component: 'Pane', requestId: 'glassbox', offset: 0, by: 100, bodyRows: 30, contentRows: 30, origin: { kind: 'person' } })
     await ui.redraw()
     expect((await code()).source).toBe(`@@ -1,0 +33,9 @@\n${lines.slice(31).map(l => `+${l}`).join('\n')}`)
 
@@ -274,7 +274,7 @@ describe('la barra', () => {
     await ui.unmount()
   })
 
-  test("l'icona accanto a un file modificato lo apre con l'applicazione del sistema", async ($, on) => {
+  test("l'icona accanto a un file modificato lo apre in VS Code, se no con l'applicazione del sistema", async ($, on) => {
     fakeEngine(on)
     FILES['/r/notes.md'] = '# Note\n'
     PENDING['/r/notes.md'] = '# Note\n\nAltro.\n'
@@ -284,17 +284,25 @@ describe('la barra', () => {
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     RUNS.length = 0
 
-    // In WSL con explorer.exe, che apre il file con l'applicazione di Windows.
-    ENV.WSL_DISTRO_NAME = 'Ubuntu'
+    // Con il comando di VS Code basta quello.
     await ui.press({ key: 'open:/r/notes.md' })
     await settle()
-    expect(RUNS).toEqual([
-      ['wslpath', '-w', '/r/notes.md'],
-      ['explorer.exe', '\\\\wsl.localhost\\Ubuntu\\r\\notes.md'],
-    ])
+    expect(RUNS).toEqual([['code', '/r/notes.md']])
     // L'anteprima non si apre: l'icona apre solo il file fuori.
     await ui.redraw()
     expect(await ui.find({ type: 'Code' })).toBeUndefined()
+
+    // Senza: in WSL con explorer.exe, che apre il file con l'applicazione di Windows.
+    MISSING.add('code')
+    ENV.WSL_DISTRO_NAME = 'Ubuntu'
+    RUNS.length = 0
+    await ui.press({ key: 'open:/r/notes.md' })
+    await settle()
+    expect(RUNS).toEqual([
+      ['code', '/r/notes.md'],
+      ['wslpath', '-w', '/r/notes.md'],
+      ['explorer.exe', '\\\\wsl.localhost\\Ubuntu\\r\\notes.md'],
+    ])
 
     // Su Linux con xdg-open.
     delete ENV.WSL_DISTRO_NAME
@@ -302,9 +310,11 @@ describe('la barra', () => {
     await ui.press({ key: 'open:/r/notes.md' })
     await settle()
     expect(RUNS).toEqual([
+      ['code', '/r/notes.md'],
       ['uname', '-s'],
       ['xdg-open', '/r/notes.md'],
     ])
+    MISSING.clear()
     await ui.unmount()
   })
 
@@ -339,7 +349,7 @@ describe('la barra', () => {
     // La rotella sopra lo slider scorre di lato, quattro colonne a tic.
     await $.ui.scroll({
       component: 'Pane',
-      requestId: 'barra-laterale',
+      requestId: 'glassbox',
       offset: 0,
       by: 2,
       bodyRows: 30,
@@ -374,7 +384,7 @@ describe('la barra', () => {
     const wheel = (by: number) =>
       $.ui.scroll({
         component: 'Pane',
-        requestId: 'barra-laterale',
+        requestId: 'glassbox',
         offset: 0,
         by,
         bodyRows: 30,

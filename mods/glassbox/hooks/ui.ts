@@ -30,3 +30,28 @@ export const ago = (ms: number, now: number): string => {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   return s < 365 * 86_400 ? `${months[d.getMonth()]} ${d.getDate()}` : String(d.getFullYear())
 }
+
+/** `text` a capo in righe di `w` colonne, tra le parole quando si può. */
+export function wrapText(text: string, w: number): string[] {
+  const chars = Array.from(text)
+  const out: string[] = []
+  let start = 0
+  while (chars.length - start > w) {
+    let cut = -1
+    for (let k = start + w; k > start; k--) {
+      if (chars[k] === ' ') {
+        cut = k
+        break
+      }
+    }
+    if (cut < 0) {
+      out.push(chars.slice(start, start + w).join(''))
+      start += w
+    } else {
+      out.push(chars.slice(start, cut).join(''))
+      start = cut + 1
+    }
+  }
+  out.push(chars.slice(start).join(''))
+  return out
+}

@@ -131,7 +131,7 @@ const expandTabs = (text: string): string => {
 
 // Code non prende caratteri di controllo oltre a tab e a capo: un \r di fine
 // riga (file CRLF) se ne va, i tab diventano spazi, gli altri diventano U+FFFD.
-const clean = (text: string): string => expandTabs(text.replace(/\r$/, '')).replace(/[\x00-\x1f\x7f-\x9f]/g, '\ufffd')
+export const clean = (text: string): string => expandTabs(text.replace(/\r$/, '')).replace(/[\x00-\x1f\x7f-\x9f]/g, '\ufffd')
 
 /**
  * Le righe da `from` a `to` come un blocco di diff unificato, con i numeri di
