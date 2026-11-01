@@ -1,0 +1,12 @@
+#!/bin/sh
+# L'interruttore degli hook: `hook-switch <nome> <comando> [argomenti...]`
+# lancia il comando con lo stesso input e lo stesso codice di uscita, a meno
+# che <nome> sia tra quelli in HOOK_SWITCH_OFF (separati da spazi): allora
+# legge l'input ed esce, come un hook che non ha niente da dire. La barra
+# laterale cambia HOOK_SWITCH_OFF solo per la sessione in cui gira.
+name=$1
+shift
+case " ${HOOK_SWITCH_OFF-} " in
+  *" $name "*) cat >/dev/null; exit 0 ;;
+esac
+exec "$@"

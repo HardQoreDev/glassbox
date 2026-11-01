@@ -1,6 +1,5 @@
-// La sezione in alto, in due viste: il grafo dei branch come in VS Code, una
-// riga per commit, o i soli rami, con i nomi dei branch e quanti commit ogni
-// nodo riassume. Un clic su un commit apre sotto di lui hash, autore e data.
+// La vista `full` di GIT: il grafo dei branch come in VS Code, una riga
+// per commit. Un clic su un commit apre sotto di lui hash, autore e data.
 import type { RenderElement } from 'claude-code'
 
 import type { GraphRow } from './graph'
@@ -35,27 +34,11 @@ const badgesOf = (row: GraphRow, room: number, most: number): Badge[] => {
 
 const badgesW = (badges: readonly Badge[]): number => badges.reduce((w, b) => w + len(b.text) + 1, 0)
 
-// I nomi che entrano in `room` colonne, con `+N` per gli altri: più nomi
-// possibile, ognuno di almeno 6 caratteri. Attorno a un nome ci sono fino a 7
-// colonne: lo spazio davanti, i margini, `◎ ` e ` ☁`. `isCut` se qualcuno
-// non si legge intero.
-const badgesIn = (row: GraphRow, room: number): { badges: Badge[]; isCut: boolean } => {
-  const refs = row.commit.refs
-  for (let most = refs.length; most > 0; most--) {
-    const plus = most < refs.length ? len(`+${refs.length - most}`) + 1 : 0
-    const each = Math.floor((room - plus) / most) - 7
-    if (each < 6) continue
-    const isCut = most < refs.length || refs.some(r => len(r.name) > each)
-    return { badges: badgesOf(row, each, most), isCut }
-  }
-  return { badges: refs.length > 0 ? [{ text: `+${refs.length}`, dim: true }] : [], isCut: refs.length > 0 }
-}
-
-// Ogni nome con uno spazio davanti; il primo senza quando `lead` è falso.
-const badgeEls = (el: Els, badges: readonly Badge[], lead = true): RenderElement[] =>
-  badges.map((b, i) => (
+// Ogni nome con uno spazio davanti.
+const badgeEls = (el: Els, badges: readonly Badge[]): RenderElement[] =>
+  badges.map(b => (
     <el.Text>
-      {lead || i > 0 ? ' ' : ''}
+      {' '}
       <el.Text backgroundColor={b.bg} color={b.fg} bold={b.bold} dimColor={b.dim}>
         {b.text}
       </el.Text>
@@ -92,7 +75,7 @@ const detailLines = (row: GraphRow, width: number, texts: readonly string[]): Li
 }
 
 // Fuori da un repo, con un errore o senza commit: una riga che lo dice.
-const emptyLines = (width: number): Line[] | undefined => {
+export const emptyLines = (width: number): Line[] | undefined => {
   if (!repo.top) return [el => <el.Text dimColor>{fit('This session is not in a git repo.', width)}</el.Text>]
   if (repo.error) return [el => <el.Text color="red">{fit(repo.error, width)}</el.Text>]
   if (repo.rows.length === 0) return [el => <el.Text dimColor>No commits.</el.Text>]
@@ -141,51 +124,6 @@ export function graphLines(width: number, now: number, select: (hash: string) =>
       ...detailLines(row, width, [
         `${c.short} · ${c.author} · ${ago(c.time * 1000, now)}`,
         ...(c.refs.length > 2 ? [c.refs.map(r => r.name).join('  ')] : []),
-      ]),
-    )
-  }
-  return lines
-}
-
-/**
- * I soli rami: le corsie e i nomi dei branch, senza messaggi; a destra quanti
- * commit nasconde ogni nodo. Un clic apre il messaggio dell'ultimo commit.
- */
-export function branchLines(width: number, now: number, select: (hash: string) => void): Line[] {
-  const empty = emptyLines(width)
-  if (empty) return empty
-
-  const lines: Line[] = []
-  for (const row of repo.simple) {
-    const c = row.commit
-    const isSelected = graph.selected === c.hash
-    const count = c.hidden ? `⋮ ${c.hidden}` : ''
-    const graphW = row.cells.length * 2
-    // Lo spazio dopo le corsie prende il posto di quello davanti al primo nome.
-    const { badges, isCut } = badgesIn(row, Math.max(4, width - graphW - len(count)))
-    // Un punto di separazione non ha nomi: si clicca sul suo hash.
-    const hash = badges.length === 0 ? c.short : ''
-    const pad = ' '.repeat(Math.max(1, width - graphW - Math.max(0, badgesW(badges) - 1) - len(hash) - len(count)))
-    const names = c.refs.map(r => r.name)
-
-    // Le corsie stanno fuori dal pulsante, che il motore inverte per intero.
-    lines.push(el => (
-      <el.Box key={`s:${c.hash}`} flexDirection="row" height={1} overflow="hidden" backgroundColor={isSelected ? SELECTED_BG : undefined}>
-        {cellsEl(el, row)}
-        <el.Button key={`branch:${c.hash}`} plain label={names.length > 0 ? names.join(', ') : c.short} onPress={() => select(c.hash)}>
-          {hash ? <el.Text dimColor>{hash}</el.Text> : badgeEls(el, badges, false)}
-        </el.Button>
-        <el.Text>{pad}</el.Text>
-        <el.Text dimColor>{count}</el.Text>
-      </el.Box>
-    ))
-
-    if (!isSelected) continue
-    lines.push(
-      ...detailLines(row, width, [
-        c.subject,
-        `${c.short} · ${c.author} · ${ago(c.time * 1000, now)}`,
-        ...(isCut ? [names.join('  ')] : []),
       ]),
     )
   }

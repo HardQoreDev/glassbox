@@ -1,5 +1,6 @@
 // Il motore finto sotto il mod, condiviso dai test: un repo in /r con le sue
-// cartelle, due hook nelle impostazioni utente, un modello che risponde.
+// cartelle e i suoi branch, due hook nelle impostazioni utente (uno con
+// hook-switch), due plugin con i loro hook, un modello che risponde.
 import type { Engine } from 'claude-code/testing'
 import type { FsEntry, On, ProcessRunResult } from 'claude-code'
 
@@ -15,6 +16,42 @@ const LOG = [
   commit('c1', '', '', 'Primo commit'),
 ].join('\n')
 
+// I branch come li dà for-each-ref: main segue origin/main; spike non è mai
+// stato spinto; wip è aperto in un altro worktree, senza commit suoi; old-fix
+// è già unito e il suo remoto è stato cancellato; feature c'è solo sul remoto.
+const ref = (...fields: string[]) => fields.join(F) + R + '\n'
+export const REFS = [
+  ref('refs/heads/main', '', 'c3', '*', 'refs/remotes/origin/main', '', '1761700000', 'c3', 'Giulio', '/r', 'Merge feature'),
+  ref('refs/heads/old-fix', '', 'c1', ' ', 'refs/remotes/origin/old-fix', 'gone', '1761000000', 'c1', 'Giulio', '', 'Primo commit'),
+  ref('refs/heads/spike', '', 's2', ' ', '', '', '1761800000', 's2', 'Ada', '', 'Prova veloce'),
+  ref('refs/heads/wip', '', 'c3', ' ', '', '', '1761700000', 'c3', 'Giulio', '/home/u/r-wip', 'Merge feature'),
+  ref('refs/remotes/origin/HEAD', 'refs/remotes/origin/main', 'c3', ' ', '', '', '1761700000', 'c3', 'Giulio', '', 'Merge feature'),
+  ref('refs/remotes/origin/feature', '', 'c1b', ' ', '', '', '1761600000', 'c1b', 'Giulio', '', 'Lavoro sul ramo'),
+  ref('refs/remotes/origin/main', '', 'c3', ' ', '', '', '1761700000', 'c3', 'Giulio', '', 'Merge feature'),
+].join('')
+// Quanti commit ognuno ha in più e in meno di origin/main.
+export const COUNTS = [
+  ['refs/heads/main', '0 0'],
+  ['refs/heads/old-fix', '0 3'],
+  ['refs/heads/spike', '2 1'],
+  ['refs/heads/wip', '0 0'],
+  ['refs/remotes/origin/HEAD', '0 0'],
+  ['refs/remotes/origin/feature', '1 2'],
+  ['refs/remotes/origin/main', '0 0'],
+]
+  .map(([name, pair]) => `${name}${F}${pair}${R}\n`)
+  .join('')
+
+// L'ultima voce del reflog dei branch remoti: main spostato da un fetch,
+// feature da un push. L'ultimo fetch, dopo, ha visto main dov'è ora e
+// feature su un commit vecchio: per main conta il fetch, per feature il push.
+const REFLOG: Record<string, string> = {
+  'refs/remotes/origin/main': `origin/main@{1761750000}${F}fetch origin: fast-forward\n`,
+  'refs/remotes/origin/feature': `origin/feature@{1761650000}${F}update by push\n`,
+}
+export const FETCH_MS = 1761900000_000
+const FETCH_HEAD = "c3\t\tbranch 'main' of example.com:me/r\nc1a\tnot-for-merge\tbranch 'feature' of example.com:me/r\n"
+
 const STATUS = ['## main...origin/main [ahead 1]', ' M src/app.ts', '?? notes.md', '!! node_modules/', ''].join('\0')
 const NUMSTAT = '3\t1\tsrc/app.ts\0'
 
@@ -29,11 +66,67 @@ const ok = (stdout: string): { value: ProcessRunResult } => ({
   value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
 })
 
-// Gli hook di ~/.claude/settings.json, come li ha la persona.
+// ~/.claude/settings.json: l'hook che blocca le scritture fuori dal progetto
+// passa da hook-switch, quello di herdr no.
 export const USER_SETTINGS = {
+  enabledPlugins: { 'codex@openai-codex': true, 'framework@local-dir': true, 'spento@openai-codex': false },
   hooks: {
-    PreToolUse: [{ matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: '/home/u/.claude/hooks/confine-writes.sh' }] }],
+    PreToolUse: [
+      {
+        matcher: 'Write|Edit|NotebookEdit',
+        hooks: [
+          {
+            type: 'command',
+            command: '/home/u/.claude/hooks/hook-switch blocca-scritture-fuori-progetto /home/u/.claude/hooks/confine-writes.sh',
+            timeout: 10,
+            statusMessage: 'Controllo confinamento scritture',
+          },
+        ],
+      },
+    ],
     SessionStart: [{ matcher: '^(startup|resume)$', hooks: [{ type: 'command', command: "bash '/home/u/.claude/hooks/herdr-agent-state.sh' session" }] }],
+  },
+}
+
+// I plugin installati: codex da GitHub, nella copia in cache, con un hook
+// senza hook-switch; framework da un marketplace `directory`, che gira dalla
+// cartella sorgente (la copia in cache, vecchia, non ha hook), con un hook
+// che passa da hook-switch. `spento` non è abilitato.
+const PLUGIN_FILES: Record<string, unknown> = {
+  '/home/u/.claude/plugins/installed_plugins.json': {
+    version: 2,
+    plugins: {
+      'codex@openai-codex': [{ scope: 'user', installPath: '/home/u/.claude/plugins/cache/openai-codex/codex/1.0.6' }],
+      'framework@local-dir': [{ scope: 'user', installPath: '/home/u/.claude/plugins/cache/local-dir/framework/1.0.0' }],
+      'spento@openai-codex': [{ scope: 'user', installPath: '/home/u/.claude/plugins/cache/openai-codex/spento/1.0.0' }],
+    },
+  },
+  '/home/u/.claude/plugins/known_marketplaces.json': {
+    'openai-codex': { source: { source: 'github', repo: 'openai/codex-plugin-cc' } },
+    'local-dir': { source: { source: 'directory', path: '/home/u/src/framework' }, installLocation: '/home/u/src/framework' },
+  },
+  '/home/u/src/framework/.claude-plugin/marketplace.json': { plugins: [{ name: 'framework', source: './' }] },
+  '/home/u/src/framework/hooks/hooks.json': {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: 'Write|Edit',
+          hooks: [
+            {
+              type: 'command',
+              command: '"${CLAUDE_PLUGIN_ROOT}/hooks/hook-switch" proteggi-scritture-del-framework python3 -I "${CLAUDE_PLUGIN_ROOT}/hooks/guard.py"',
+              timeout: 30,
+            },
+          ],
+        },
+      ],
+    },
+  },
+  '/home/u/.claude/plugins/cache/openai-codex/codex/1.0.6/hooks/hooks.json': {
+    hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-review-gate-hook.mjs"', timeout: 900 }] }] },
+  },
+  '/home/u/.claude/plugins/cache/openai-codex/spento/1.0.0/hooks/hooks.json': {
+    hooks: { Stop: [{ hooks: [{ type: 'command', command: 'non-deve-comparire.sh' }] }] },
   },
 }
 
@@ -46,12 +139,15 @@ const usage = (input: number, cached: number, output: number) => ({
 })
 
 // Le variabili d'ambiente che il mod legge, e i comandi che lancia oltre a git.
-export const ENV: Record<string, string> = {}
+export const ENV: Record<string, string> = { HOME: '/home/u' }
 export const RUNS: string[][] = []
 
 // Il contenuto dei file come lo legge $.fs.read, e le scritture in attesa che
 // uno strumento applica quando gira.
-export const FILES: Record<string, string> = {}
+export const FILES: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(PLUGIN_FILES).map(([path, json]) => [path, JSON.stringify(json)])),
+  '/r/.git/FETCH_HEAD': FETCH_HEAD,
+}
 export const PENDING: Record<string, string> = {}
 
 /** Lascia finire il lavoro che il mod fa fuori dal giro degli strumenti. */
@@ -60,7 +156,11 @@ export async function settle(): Promise<void> {
 }
 
 export function fakeEngine(on: On, opened: string[] = []) {
-  on('settings.read', (_, e) => ({ value: (e as { source?: string }).source === 'user' ? USER_SETTINGS : {} }) as never)
+  // Le impostazioni utente, da sole o come base dell'unione di tutte.
+  on('settings.read', (_, e) => {
+    const source = (e as { source?: string }).source
+    return { value: source === 'user' || source === undefined ? USER_SETTINGS : {} } as never
+  })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.root', () => ({ value: '/r' }))
   on('session.cwd', () => ({ value: '/r' }))
@@ -77,17 +177,30 @@ export function fakeEngine(on: On, opened: string[] = []) {
   on('ui.log', () => ({ value: undefined }))
   on('fs.list', (_, e) => ({ value: DIRS[String((e as { path?: string }).path)] ?? [] }) as never)
   on('env.get', (_, e) => ({ value: ENV[e.name] }) as never)
+  on('env.set', (_, e) => {
+    if (e.value === undefined) delete ENV[e.name]
+    else ENV[e.name] = e.value
+    return { value: {} }
+  })
   on('process.run', (_, e) => {
     if (e.argv[0] !== 'git') RUNS.push([...e.argv])
     if (e.argv[0] === 'wslpath') return ok(`\\\\wsl.localhost\\Ubuntu${String(e.argv[2]).replaceAll('/', '\\')}\n`)
     if (e.argv[0] === 'uname') return ok('Linux\n')
     const args = e.argv.join(' ')
+    if (args.includes('for-each-ref')) return ok(args.includes('ahead-behind') ? COUNTS : REFS)
+    if (args.includes(' reflog ')) return ok(REFLOG[String(e.argv.at(-2))] ?? '')
+    if (args.includes('--git-common-dir')) return ok('/r/.git\n')
     if (args.includes('rev-parse')) return ok('/r\n')
-    if (args.includes(' remote')) return ok('origin\n')
+    if (args.includes(' remote')) return ok('origin\tgit@example.com:me/r.git (fetch)\norigin\tgit@example.com:me/r.git (push)\n')
     if (args.includes(' log ')) return ok(LOG)
     if (args.includes(' status ')) return ok(STATUS)
     if (args.includes(' diff ')) return ok(NUMSTAT)
     return ok('')
+  })
+  on('fs.stat', (_, e) => {
+    const path = String((e as { path?: string }).path)
+    if (path !== '/r/.git/FETCH_HEAD') throw new Error(`ENOENT: ${path}`)
+    return { value: { kind: 'file', size: FETCH_HEAD.length, mtimeMs: FETCH_MS } } as never
   })
   on('fs.read', (_, e) => {
     const path = String((e as { path?: string }).path)

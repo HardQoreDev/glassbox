@@ -1,26 +1,26 @@
 // La sezione in basso: il disegno di turn-inspector (claude-code-templates,
 // hooks/turn-inspector.tsx) spezzato in righe, perché la sezione ne mostra
-// solo quante ne stanno. Stessa palette: input in terracotta, output in grigio.
+// solo quante ne stanno. Input in viola, output in grigio.
 import { turns } from './turns-state'
 import { cell, fit, len } from './ui'
 import type { Line } from './ui'
 import { barCells, contextAfter, fmtTokens, gist, inputStack } from './vendor/turns'
 import type { Block, BlockKind, Turn } from './vendor/turns'
 
-const INK = '#f4ece6'
+const INK = '#f3eeff'
 const STYLE: Record<BlockKind, { icon: string; bg: string; fg: string }> = {
-  system: { icon: '⚙', bg: '#4a2a1d', fg: '#e8cbb8' },
-  history: { icon: '↺', bg: '#6b3d2a', fg: INK },
-  user: { icon: '❯', bg: '#9a5a3e', fg: INK },
-  tool_result: { icon: '⇠', bg: '#9a5a3e', fg: INK },
+  system: { icon: '⚙', bg: '#2e1f4d', fg: '#d8c8f0' },
+  history: { icon: '↺', bg: '#4c3480', fg: INK },
+  user: { icon: '❯', bg: '#6d4fc2', fg: INK },
+  tool_result: { icon: '⇠', bg: '#6d4fc2', fg: INK },
   thinking: { icon: '✻', bg: '#151515', fg: '#d6d6d6' },
   text: { icon: '¶', bg: '#5e5e5e', fg: INK },
   tool_use: { icon: '⚒', bg: '#5e5e5e', fg: INK },
   truncated: { icon: '✂', bg: '#2b2b2b', fg: '#9a9a9a' },
 }
-export const INPUT_RAIL = '#c8734f'
+export const INPUT_RAIL = '#a78bfa'
 const OUTPUT_RAIL = '#8c8c8c'
-const BAR = { system: '#4a2a1d', history: '#8a4f37', added: '#d9875f', output: '#9a9a9a', free: '#3a3a3a' }
+const BAR = { system: '#2e1f4d', history: '#5b3fa0', added: '#a78bfa', output: '#9a9a9a', free: '#3a3a3a' }
 
 /** Il testo accanto al titolo: quanto contesto è in uso, e la percentuale. */
 export const turnsInfo = (): { text: string; color?: string; dim?: boolean }[] => {

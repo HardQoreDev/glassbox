@@ -2,6 +2,9 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { ENV, FILES, PANE, PENDING, RUNS, fakeEngine, oneTurn, settle, start } from './engine'
 
+// Un pannello alto, perché i branch e i loro dettagli stiano tutti nella sezione.
+const TALL = { ...PANE, props: { ...PANE.props, scroll: { offset: 0, bodyRows: 80 } } }
+
 describe('la barra', () => {
   for (const surface of ['terminal', 'desktop'] as const) {
     test(`quattro sezioni: hook, grafo, file e turni (${surface})`, async ($, on) => {
@@ -14,7 +17,11 @@ describe('la barra', () => {
       const ui = await $.ui.mount({ ...PANE, surface })
       for (const key of ['section:hooks', 'section:graph', 'section:files', 'section:turns']) expect(await ui.find({ key })).toBeDefined()
 
-      // il grafo: il merge in testa, il branch attuale avanti di uno
+      // i branch: il principale in alto, il branch attuale avanti di uno sul remoto
+      expect((await ui.find({ key: 'branch:refs/heads/main' }))?.text).toBe('◎ main')
+      // il grafo: il merge in testa
+      await ui.press({ key: 'graph-view-full' })
+      await ui.redraw()
       expect(await ui.find({ key: 'commit:c3' })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /↑1/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /◎ main ☁/ })).toBeDefined()
@@ -47,6 +54,8 @@ describe('la barra', () => {
     await ui.redraw()
     expect(await ui.find({ key: 'file:/r/src/app.ts' })).toBeDefined()
 
+    await ui.press({ key: 'graph-view-full' })
+    await ui.redraw()
     await ui.press({ key: 'commit:c3' })
     await ui.redraw()
     expect(await ui.find({ type: 'Text', text: /c3 · Giulio/ })).toBeDefined()
@@ -58,32 +67,72 @@ describe('la barra', () => {
     await ui.unmount()
   })
 
-  test('la vista dei soli rami: le punte con i loro nomi, un clic apre il commit', async ($, on) => {
+  test('la vista active: il principale in alto, sotto i branch attivi, gli uniti contati', async ($, on) => {
     fakeEngine(on, [])
     await start($)
-    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const ui = await $.ui.mount({ ...TALL, surface: 'terminal' })
 
-    await ui.press({ key: 'graph-view-graph' })
-    await ui.redraw()
+    // È la vista di partenza.
     expect(await ui.find({ key: 'commit:c3' })).toBeUndefined()
-    expect(await ui.find({ key: 'branch:c3' })).toBeDefined()
-    expect(await ui.find({ key: 'branch:c1b' })).toBeDefined()
-    // il commit di main e la radice sono nascosti, contati sotto le punte
-    expect(await ui.find({ key: 'branch:c2' })).toBeUndefined()
-    expect(await ui.find({ key: 'branch:c1' })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: /◎ main ☁/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /⋮ 1/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /Merge feature/ })).toBeUndefined()
+    const rows = async () => (await ui.findAll({ type: 'Box' })).filter(b => b.key?.startsWith('b:')).map(b => b.text)
+    const shown = await rows()
+    // main segue origin/main; poi dal più recente: spike mai spinto, wip
+    // senza commit suoi ma aperto in un worktree, feature solo sul remoto.
+    // A destra l'ultima sincronizzazione; un branch mai spinto non ne ha.
+    expect(shown[0]).toMatch(/^◎ main +last sync +\S+$/)
+    expect(shown[1]).toMatch(/^├─ spike +\+2 −1 {2}local *$/)
+    expect(shown[2]).toMatch(/^├─ wip += {5}local *$/)
+    expect(shown[3]).toMatch(/^└─ feature +\+1 −2 {2}remote +\S+$/)
+    // old-fix è già in origin/main: solo contato.
+    expect(shown[4]).toBe('   ▸ 1 merged')
+    expect(await ui.find({ key: 'branch:refs/heads/old-fix' })).toBeUndefined()
+    // origin/main e origin/HEAD sono il principale, non righe loro.
+    expect(shown).toHaveLength(5)
 
-    await ui.press({ key: 'branch:c3' })
+    await ui.press({ key: 'branches-merged' })
     await ui.redraw()
-    expect(await ui.find({ type: 'Text', text: /Merge feature/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /c3 · Giulio/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^ {5}old-fix$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '▾ 1 merged' })).toBeDefined()
 
     await ui.press({ key: 'graph-view-full' })
     await ui.redraw()
     expect(await ui.find({ key: 'commit:c3' })).toBeDefined()
-    expect(await ui.find({ key: 'branch:c3' })).toBeUndefined()
+    expect(await ui.find({ key: 'branch:refs/heads/main' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('un clic su un branch apre il suo ultimo commit, il confronto, il remoto e il worktree', async ($, on) => {
+    fakeEngine(on, [])
+    await start($)
+    const ui = await $.ui.mount({ ...TALL, surface: 'terminal' })
+
+    await ui.press({ key: 'branch:refs/heads/spike' })
+    await ui.redraw()
+    for (const text of [/│  Prova veloce/, /│  s2 · Ada · committed .+ ago$/, /│  2 commits ahead of origin\/main, 1 behind/, /│  not on any remote/])
+      expect(await ui.find({ type: 'Text', text })).toBeDefined()
+    // Mai spinto: nei dettagli non c'è un'ultima sincronizzazione.
+    expect(await ui.find({ type: 'Text', text: /│  last sync/ })).toBeUndefined()
+
+    // Uno alla volta; l'ultimo della lista non ha la linea dell'albero a sinistra.
+    await ui.press({ key: 'branch:refs/heads/wip' })
+    await ui.redraw()
+    expect(await ui.find({ type: 'Text', text: /Prova veloce/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /same commit as origin\/main/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'open in ~/r-wip' })).toBeDefined()
+
+    await ui.press({ key: 'branch:refs/remotes/origin/feature' })
+    await ui.redraw()
+    expect(await ui.find({ type: 'Text', text: /only on the remote, as origin\/feature/ })).toBeDefined()
+    // Il push è dopo l'ultimo fetch che l'ha visto sullo stesso commit.
+    expect(await ui.find({ type: 'Text', text: /last sync .+ ago, by push$/ })).toBeDefined()
+
+    await ui.press({ key: 'branch:refs/heads/main' })
+    await ui.redraw()
+    expect(await ui.find({ type: 'Text', text: /in sync with origin\/main/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /last sync .+ ago, by fetch$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /the branches below are compared with origin\/main/ })).toBeDefined()
+    // Il worktree di main è questo: non si ripete.
+    expect(await ui.find({ type: 'Text', text: /open in/ })).toBeUndefined()
     await ui.unmount()
   })
 

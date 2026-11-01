@@ -8,12 +8,35 @@ I mod di Claude Code di HardQoreDev. Un mod cambia l'interfaccia o il comportame
 
 Una barra a destra in quattro sezioni, ognuna con la sua barretta colorata:
 
-- **HOOKS**: gli hook delle tue impostazioni, uno per riga con un pulsante `ON` / `OFF`. `OFF` vale solo per la sessione e non tocca `settings.json`. Quando un hook scatta, il nome si illumina: giallo mentre gira, verde se è passato, rosso se ha bloccato, grigio se è stato saltato.
-- **BRANCHES**: il grafo dei commit di tutti i branch, come in VS Code, con una corsia colorata per ramo. Un clic su un commit mostra hash, autore e data. La vista **graph** mostra solo la forma dei rami: le punte dei branch con i loro nomi e i punti in cui si separano (con l'hash corto), senza messaggi; `⋮ N` dice quanti commit nasconde ogni nodo, e un clic mostra l'ultimo commit.
+- **HOOKS**: gli hook della sessione, raggruppati per evento: quelli delle tue impostazioni (utente, progetto, locale, `--settings`, organizzazione) e quelli dei plugin abilitati. Ognuno ha un nome che dice cosa fa, da dove viene e il pulsante `ON` / `OFF`, che lo spegne solo in questa sessione; un clic sul nome mostra il comando, il file e il timeout. Quelli che non si possono spegnere (`ALWAYS` e `MANAGED`) partono nascosti, contati accanto al titolo: il pulsante `always` li mostra e li nasconde. Si spengono gli hook scritti con `hook-switch`: vedi [Spegnere gli hook](#spegnere-gli-hook-la-regola-hook-switch).
+- **GIT**: la vista **active** (quella di partenza) è uno schema dei branch ancora in corso. In alto c'è il principale (quello a cui punta HEAD del remoto, se no `main` o `master`), e sotto sono appesi i branch con commit che lui non ha, più quello attuale e quelli aperti in un worktree. Ogni riga dice `+N −M` (commit in più e in meno del principale) e com'è messa sul remoto: `↑` da spingere e `↓` da tirare giù, poi `last sync` con il tempo dall'ultima sincronizzazione (l'ultimo push o fetch che ha spostato il branch remoto, o l'ultimo fetch che l'ha visto dov'è), `local` se non è mai stato spinto, `gone` se è stato cancellato sul remoto, `remote` se c'è solo là. I branch già uniti sono contati in una riga che, con un clic, li elenca. Un clic su un branch mostra l'ultimo commit e quando è stato fatto, il confronto a parole, l'ultima sincronizzazione e il worktree in cui è aperto. La vista **full** è il grafo dei commit di tutti i branch, come in VS Code, con una corsia colorata per ramo; un clic su un commit mostra hash, autore e data.
 - **FILES**: i file modificati nella sessione con le righe inserite e cancellate (vista `changed`), oppure l'albero delle cartelle con lo stato git (vista `tree`). Un clic su un file modificato apre l'anteprima: il file com'è adesso, con le righe aggiunte in verde e quelle tolte in rosso rispetto a prima della sessione; le righe troppo larghe si leggono con lo slider in fondo, oppure vanno a capo con `wrap`. L'icona `↗` accanto a ogni file lo apre con l'applicazione predefinita del sistema (in WSL quella di Windows).
-- **TURNS**: ogni richiesta al modello con input, output e finestra di contesto.
+- **CONTEXT**: ogni richiesta al modello con input, output e finestra di contesto.
 
 Si apre con `/sidebar` e si chiude con `/sidebar close`. Nel terminale sta a destra con il layout a schermo intero (`/tui fullscreen`) e almeno 110 colonne; altrimenti compare sopra il prompt. Dettagli in [`mods/barra-laterale/README.md`](mods/barra-laterale/README.md).
+
+#### Spegnere gli hook: la regola `hook-switch`
+
+Con un account Team o Enterprise, Claude Code mette davanti a tutti un suo plugin di sicurezza che non passa ai mod gli eventi degli hook: un mod non può fermare un hook. Per questo gli hook si scrivono in modo che si spengano da soli:
+
+```json
+{ "type": "command",
+  "command": "~/.claude/hooks/hook-switch blocca-scritture-fuori-progetto ~/.claude/hooks/confine-writes.sh" }
+```
+
+`hook-switch <nome> <comando>` lancia il comando con lo stesso input e lo stesso codice di uscita, a meno che `<nome>` sia nella variabile `HOOK_SWITCH_OFF` (nomi separati da spazi): allora esce senza fare niente. Il nome è una parola sola con i trattini e dice cosa fa l'hook (`blocca-scritture-fuori-progetto`, `segnala-sessione-a-herdr`): la barra lo usa come titolo della riga. Il pulsante `OFF` cambia quella variabile solo nella sessione in cui lo premi, e ha effetto subito; le altre sessioni non la vedono. Una sessione può anche partire con un hook già spento: `HOOK_SWITCH_OFF="segnala-sessione-a-herdr" claude`.
+
+Lo script è in [`mods/barra-laterale/bin/hook-switch`](mods/barra-laterale/bin/hook-switch) e serve `sh` (Linux, macOS, WSL). Dalla cartella della repo:
+
+```bash
+install -m 755 mods/barra-laterale/bin/hook-switch ~/.claude/hooks/hook-switch
+```
+
+- Un hook scritto senza `hook-switch` si vede con il nome del suo script e `ALWAYS` al posto del pulsante.
+- Gli hook dell'organizzazione (`MANAGED`) non si spengono.
+- Gli hook dei plugin compaiono con il nome del plugin. Si spengono solo se il plugin li scrive con `hook-switch`, portandosi dietro la sua copia dello script: `"${CLAUDE_PLUGIN_ROOT}/hooks/hook-switch" <nome> <comando>`.
+- Uno strumento che riscrive il proprio hook nelle impostazioni (herdr quando si aggiorna, per esempio) può togliere `hook-switch`: la riga torna `ALWAYS`.
+- Non c'è uno spegnimento permanente in un file, perché quel file potrebbe scriverlo anche Claude. La variabile della sessione la cambia solo la barra: i comandi lanciati da Claude hanno un ambiente loro.
 
 ### copia-risposta
 

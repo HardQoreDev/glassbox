@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { layout, parseLog, simplify } from '../hooks/graph'
+import { layout, parseLog } from '../hooks/graph'
 import type { GraphRow } from '../hooks/graph'
 
 const F = '\x1f'
@@ -56,54 +56,5 @@ describe('layout', () => {
     const rows = layout(parseLog(log, []))
     expect(drawn(rows[0])).toBe('●')
     expect(drawn(rows[1])).toBe('│ ●')
-  })
-})
-
-describe('simplify', () => {
-  const simple = (log: string) => simplify(parseLog(log, ['origin']))
-  const shape = (log: string) => simple(log).map(c => `${c.hash}<${c.parents.join(',')}>${c.hidden}`)
-
-  test('un ramo solo diventa la sua punta, con i commit sotto riassunti', () => {
-    const log = [commit('c3', 'c2', 'HEAD -> main', 'Tre'), commit('c2', 'c1', '', 'Due'), commit('c1', '', '', 'Uno')].join('\n')
-    expect(shape(log)).toEqual(['c3<>2'])
-  })
-
-  test('due rami che si separano: le punte e il punto dove si dividono', () => {
-    const log = [
-      commit('m2', 'm1', 'HEAD -> main', 'Main'),
-      commit('f2', 'f1', 'feature', 'Ramo'),
-      commit('m1', 'b0', '', 'Main prima'),
-      commit('f1', 'b0', '', 'Ramo prima'),
-      commit('b0', 'r0', '', 'Base'),
-      commit('r0', '', '', 'Radice'),
-    ].join('\n')
-    expect(shape(log)).toEqual(['m2<b0>1', 'f2<b0>1', 'b0<>1'])
-    expect(layout(simple(log)).map(drawn)).toEqual(['○', '│ ●', '●─╯'])
-  })
-
-  test('un ramo già unito sta sotto la punta che lo contiene, senza punto di separazione', () => {
-    // feature si separa da c0, torna in main con il merge m2 e main va avanti
-    const log = [
-      commit('m3', 'm2', 'HEAD -> main', 'Dopo il merge'),
-      commit('m2', 'm1 f2', '', 'Merge feature'),
-      commit('f2', 'f1', 'feature', 'Ramo'),
-      commit('m1', 'c0', '', 'Main'),
-      commit('f1', 'c0', '', 'Ramo prima'),
-      commit('c0', 'r0', '', 'Base'),
-      commit('r0', '', '', 'Radice'),
-    ].join('\n')
-    expect(shape(log)).toEqual(['m3<f2>2', 'f2<>3'])
-    expect(simple(LOG).map(c => `${c.hash}<${c.parents.join(',')}>${c.hidden}`)).toEqual(['c3<c1b>1', 'c1b<>1'])
-  })
-
-  test('i rami cancellati dopo il merge spariscono dentro main', () => {
-    const log = [
-      commit('m2', 'm1 x2', 'HEAD -> main', 'Merge x'),
-      commit('x2', 'x1', '', 'x due'),
-      commit('m1', 'm0', '', 'Main'),
-      commit('x1', 'm0', '', 'x uno'),
-      commit('m0', '', '', 'Radice'),
-    ].join('\n')
-    expect(shape(log)).toEqual(['m2<>4'])
   })
 })
