@@ -143,7 +143,7 @@ describe('quello che entra nel contesto', () => {
     await ui.unmount()
   })
 
-  test('la tendina stats mostra i numeri, gli strumenti più usati e i consigli', async ($, on) => {
+  test('la tendina stats: cinque viste, i numeri e i consigli', { timeoutMs: 20_000 }, async ($, on) => {
     fakeEngine(on)
     BREAKDOWN.value = {
       rawMaxTokens: 200_000,
@@ -161,12 +161,73 @@ describe('quello che entra nel contesto', () => {
     const ui = await $.ui.mount({ ...TALL, surface: 'terminal' })
     // Le altre sezioni chiuse, perché la tendina entri intera.
     for (const key of ['section:hooks', 'section:graph', 'section:files']) await ui.press({ key })
-    await ui.press({ key: 'turns-stats' })
-    await ui.redraw()
-    for (const text of [/^requests {4}$/, '2 in 1 prompt · up to 2 in one', /^cache/, 'by category', 'most used tools · calls · tokens in context', /^Read/, 'tips'])
-      expect(await ui.find({ type: 'Text', text })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^The MCP server docs puts 9\.0k of tool schemas in every/ })).toBeDefined()
+    const tab = async (key: string) => {
+      await ui.press({ key })
+      await settle()
+      await ui.redraw()
+    }
+    const has = async (...texts: (string | RegExp)[]) => {
+      for (const text of texts) expect(await ui.find({ type: 'Text', text })).toBeDefined()
+    }
+    await tab('turns-stats')
+    // health, la vista di partenza: i numeri che contano e tutti i consigli.
+    await has('health', 'fill', 'waste', 'flow', 'tools', /^in use/, /^preloaded/, /^reclaimable/, /^cache/, 'tips')
+    await has(/^The MCP server docs puts 9\.0k of tool schemas in every/)
+    await tab('stats-tab:flow')
+    await has(/^requests {4}$/, '2 in 1 prompt · up to 2 in one', /^input {7}$/)
+    await tab('stats-tab:tools')
+    await has(/^tool calls/, 'most used · calls · results in context', /^Read/)
+    await tab('stats-tab:waste')
+    await has(/^MCP docs/, '0 of 1 tool used · 9.0k a request')
+    // fill: di cosa è fatta l'ultima richiesta, e i blocchi più pesanti che si aprono.
+    await tab('stats-tab:fill')
+    await has(/^what fills #2 · /, 'heaviest · click to open', /^⚒ Read notes\.md/, 'by category · as /context counts it')
+    await tab('stats-heavy:0')
+    await has('#2 earlier')
     BREAKDOWN.value = undefined
+    await ui.unmount()
+  })
+
+  test('un blocco tra i più pesanti apre la richiesta al suo titolo', { timeoutMs: 20_000 }, async ($, on) => {
+    fakeEngine(on)
+    await start($)
+    const prompt = Array.from({ length: 300 }, (_, i) => `riga ${i}`).join('\n')
+    const input = { file_path: '/r/big.ts', content: 'w'.repeat(6_000) }
+    MESSAGES.length = 0
+    MESSAGES.push({ role: 'user', content: [{ type: 'text', text: prompt }] })
+    REPLIES.push(
+      {
+        chunks: [
+          { kind: 'tool', index: 0, id: 'toolu_1', name: 'Write' },
+          { kind: 'input', index: 0, json: JSON.stringify(input) },
+        ],
+        usage: [800, 14_000, 30],
+      },
+      { chunks: [{ kind: 'text', index: 0, text: 'Fatto.' }], usage: [100, 14_800, 20] },
+    )
+    await $.turn.start({ text: prompt, turnId: 't1' })
+    const first = $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })
+    for (;;) if ((await first.next()).done) break
+    MESSAGES.push({ role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Write', input }] }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' }] })
+    const second = $.turn.step({ turnId: 't1', index: 1, model: 'claude-opus-5-5', messageCount: 3 })
+    for (;;) if ((await second.next()).done) break
+    await $.turn.complete({ answer: 'Fatto.', durationMs: 900, isAborted: false, turnId: 't1', reason: 'answer' })
+    await settle()
+
+    const ui = await $.ui.mount({ ...TALL, surface: 'terminal' })
+    for (const key of ['section:hooks', 'section:graph', 'section:files', 'turns-stats', 'stats-tab:fill']) {
+      await ui.press({ key })
+      await ui.redraw()
+    }
+    expect(await ui.find({ type: 'Text', text: /^⚒ Write big\.ts/ })).toBeDefined()
+    await ui.press({ key: 'stats-heavy:0' })
+    await settle()
+    await ui.redraw()
+    expect(await ui.find({ type: 'Text', text: '#2 earlier' })).toBeDefined()
+    // Il titolo della chiamata è la prima riga: il prompt lungo è sopra, fuori vista.
+    expect(await ui.find({ type: 'Text', text: '▸ tool_use · Write · toolu_1' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'riga 299' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /^── 1 · user/ })).toBeUndefined()
     await ui.unmount()
   })
 })

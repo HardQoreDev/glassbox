@@ -1,13 +1,14 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { ENV, FILES, MISSING, PANE, PENDING, RUNS, fakeEngine, oneTurn, settle, start } from './engine'
+import { ENV, FILES, MISSING, PANE, PENDING, REMOTE_TAGS, RUNS, fakeEngine, oneTurn, settle, start } from './engine'
 
 // Un pannello alto, perché i branch e i loro dettagli stiano tutti nella sezione.
 const TALL = { ...PANE, props: { ...PANE.props, scroll: { offset: 0, bodyRows: 80 } } }
 
 describe('la barra', () => {
   for (const surface of ['terminal', 'desktop'] as const) {
-    test(`quattro sezioni: hook, grafo, file e turni (${surface})`, async ($, on) => {
+    // Il primo test del file carica il mod: su una macchina carica supera i 5 secondi di partenza.
+    test(`quattro sezioni: hook, grafo, file e turni (${surface})`, { timeoutMs: 20_000 }, async ($, on) => {
       const opened: string[] = []
       fakeEngine(on, opened)
       await start($)
@@ -133,6 +134,53 @@ describe('la barra', () => {
     expect(await ui.find({ type: 'Text', text: /the branches below are compared with origin\/main/ })).toBeDefined()
     // Il worktree di main è questo: non si ripete.
     expect(await ui.find({ type: 'Text', text: /open in/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('la vista tags: i tag dal più recente, il confronto con il principale e il remoto', async ($, on) => {
+    fakeEngine(on, [])
+    await start($)
+    const ui = await $.ui.mount({ ...TALL, surface: 'terminal' })
+    const press = async (key: string) => {
+      await ui.press({ key })
+      await settle()
+      await ui.redraw()
+    }
+    // Il testo che manca si legge nell'errore.
+    const has = async (...texts: (string | RegExp)[]) => {
+      for (const text of texts) expect((await ui.find({ type: 'Text', text })) ? text : `missing: ${text}`).toEqual(text)
+    }
+    REMOTE_TAGS.calls = 0
+    await press('graph-view-tags')
+    // Il remoto si legge all'apertura della vista, una volta.
+    expect(REMOTE_TAGS.calls).toBe(1)
+    expect(await ui.find({ key: 'branch:refs/heads/main' })).toBeUndefined()
+    expect((await ui.find({ key: 'tag:refs/tags/v1.1' }))?.text).toBe('◆ v1.1')
+    expect((await ui.find({ key: 'tag:refs/tags/v1.0' }))?.text).toBe('◇ v1.0')
+    await has('3 since', 'off trunk', 'local', 'moved', '3 tags', ' · 1 not pushed', /^origin checked just now$/)
+
+    // Un clic apre i dettagli, uno alla volta.
+    await press('tag:refs/tags/v1.1')
+    await has('  Release 1.1', /^  c3 · tagged by Giulio .+ ago$/, '  commit: Merge feature', '  annotated tag', '  same commit as origin/main', '  on origin', '  HEAD is here')
+    await press('tag:refs/tags/v1.0')
+    expect(await ui.find({ type: 'Text', text: '  Release 1.1' })).toBeUndefined()
+    await has('  lightweight tag: no message, no tagger', '  3 commits on origin/main since this tag', '  not on origin: git push origin v1.0')
+    await press('tag:refs/tags/exp')
+    await has('  not in origin/main: 1 commit only here', '  2 commits on origin/main since this tag', '  origin has it on another commit')
+
+    // ↻ lo rilegge; anche un push fatto da Claude.
+    await press('graph-refresh')
+    expect(REMOTE_TAGS.calls).toBe(2)
+    REMOTE_TAGS.out = 'tag11\trefs/tags/v1.1\nother\trefs/tags/exp\nc1\trefs/tags/v1.0\n'
+    await $.tool.call({ tool: 'Bash', command: 'git push origin v1.0' } as never)
+    // Il giro dopo lo strumento rilegge il repo, poi chiede al remoto: si aspetta la risposta.
+    for (let i = 0; i < 50 && (await ui.find({ type: 'Text', text: ' · 1 not pushed' })); i++) {
+      await settle()
+      await ui.redraw()
+    }
+    expect(REMOTE_TAGS.calls).toBe(3)
+    expect(await ui.find({ type: 'Text', text: ' · 1 not pushed' })).toBeUndefined()
+    REMOTE_TAGS.out = 'tag11\trefs/tags/v1.1\nother\trefs/tags/exp\n'
     await ui.unmount()
   })
 

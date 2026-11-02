@@ -26,7 +26,8 @@ const MAX_EPOCHS = 8
 const MAX_DATA = 200
 
 type Epoch = { messages: readonly ApiMessage[] }
-type Sent = { epoch: Epoch; count: number }
+// `messages` è la loro lista, tagliata la prima volta che serve.
+type Sent = { epoch: Epoch; count: number; messages?: readonly ApiMessage[] }
 type OutBlock = { index: number; kind: 'thinking' | 'text' | 'tool_use'; name?: string; id?: string; text: string }
 type ToolSeen = { description: string; isDeferred: boolean }
 
@@ -50,6 +51,8 @@ export const doc = {
   // Cresce a ogni apertura: le righe a capo si ricalcolano.
   version: 0,
   offset: 0,
+  // La riga a cui portare la finestra al prossimo disegno, poi si dimentica.
+  focus: undefined as number | undefined,
   left: 0,
   wrap: true,
 }
@@ -85,6 +88,14 @@ export function recordSent(n: number, messages: readonly ApiMessage[]): void {
     for (const [k, s] of store.sent) if (s.epoch === gone) store.sent.delete(k)
   }
   store.sent.set(n, { epoch, count: messages.length })
+}
+
+/** I messaggi che la richiesta del turno `n` ha portato, se si sono visti partire; la stessa lista a ogni chiamata. */
+export function sentMessages(n: number): readonly ApiMessage[] | undefined {
+  const s = store.sent.get(n)
+  if (!s) return undefined
+  s.messages ??= s.epoch.messages.slice(0, s.count)
+  return s.messages
 }
 
 /** Un pezzo della risposta del turno `n`, nel suo blocco. */
@@ -172,14 +183,21 @@ function blockLines(b: ApiBlock, names: ReadonlyMap<string, string>): DocLine[] 
   }
 }
 
-/** I messaggi da `from` a `to`, numerati nella richiesta; ogni blocco con il suo titolo. */
-export function messageLines(messages: readonly ApiMessage[], from: number, to: number): DocLine[] {
+/**
+ * I messaggi da `from` a `to`, numerati nella richiesta; ogni blocco con il suo
+ * titolo. `marks`, se c'è, riceve la riga del titolo di ogni blocco, per
+ * `messaggio:blocco`.
+ */
+export function messageLines(messages: readonly ApiMessage[], from: number, to: number, marks?: Map<string, number>): DocLine[] {
   const names = new Map<string, string>()
   for (const m of messages) for (const b of m.content) if (b.type === 'tool_use') names.set(text(b.id), text(b.name))
   const out: DocLine[] = []
   messages.slice(from, to).forEach((m, k) => {
     out.push({ text: `${from + k + 1} · ${m.role}`, tone: m.role })
-    for (const b of m.content) out.push(...blockLines(b, names), { text: '' })
+    m.content.forEach((b, bi) => {
+      marks?.set(`${from + k}:${bi}`, out.length)
+      out.push(...blockLines(b, names), { text: '' })
+    })
   })
   return out
 }
@@ -236,7 +254,15 @@ function tokensOf(l: Ledger, t: Turn, part: Part): string {
 
 const NOT_SEEN = 'Glassbox did not see this request go out: it reads what a request carries as it is sent.'
 
-async function partLines($: EngineInterface, t: Turn, part: Part): Promise<{ lines: DocLine[]; count: string }> {
+/** Un blocco di una richiesta: il messaggio e la sua posizione nel messaggio. */
+export type Focus = { message: number; block: number }
+
+/** Il pezzo di una richiesta in cui sta il messaggio `message`. */
+export function partAt(messages: readonly ApiMessage[], message: number): Part {
+  return message >= newFrom(messages) ? 'new' : 'earlier'
+}
+
+async function partLines($: EngineInterface, t: Turn, part: Part, focus?: Focus): Promise<{ lines: DocLine[]; count: string; at?: number }> {
   if (part === 'system') {
     const model = t.model ?? ''
     const composed = await $.prompt.compose(model ? { model } : {}).catch(() => $.prompt.compose())
@@ -270,20 +296,16 @@ async function partLines($: EngineInterface, t: Turn, part: Part): Promise<{ lin
         ? 'Nothing before: this request opens the conversation.'
         : `The conversation this request carried before its new input, after the engine's normalization.`
       : 'What this request added: the prompt, or the results of the tools the last answer called.'
-  return {
-    lines: [
-      { text: note, tone: 'note' },
-      { text: 'Cache marks and the reminders a request sends as system turns are not in the messages.', tone: 'note' },
-      { text: '' },
-      ...messageLines(messages, from, to),
-    ],
-    count: plural(to - from, 'message'),
-  }
+  const head: DocLine[] = [{ text: note, tone: 'note' }, { text: 'Cache marks and the reminders a request sends as system turns are not in the messages.', tone: 'note' }, { text: '' }]
+  const marks = new Map<string, number>()
+  const body = messageLines(messages, from, to, marks)
+  const mark = focus ? marks.get(`${focus.message}:${focus.block}`) : undefined
+  return { lines: [...head, ...body], count: plural(to - from, 'message'), ...(mark !== undefined ? { at: head.length + mark } : {}) }
 }
 
-/** Apre la finestra su un pezzo del contesto del turno `t`. */
-export async function openContext($: EngineInterface, l: Ledger, t: Turn, part: Part): Promise<void> {
-  const { lines: docLines, count } = await partLines($, t, part)
+/** Apre la finestra su un pezzo del contesto del turno `t`; con `focus`, sul titolo di quel blocco. */
+export async function openContext($: EngineInterface, l: Ledger, t: Turn, part: Part, focus?: Focus): Promise<void> {
+  const { lines: docLines, count, at } = await partLines($, t, part, focus)
   Object.assign(doc, {
     isOpen: true,
     n: t.n,
@@ -294,6 +316,7 @@ export async function openContext($: EngineInterface, l: Ledger, t: Turn, part: 
     version: doc.version + 1,
     offset: 0,
     left: 0,
+    focus: at,
   })
 }
 

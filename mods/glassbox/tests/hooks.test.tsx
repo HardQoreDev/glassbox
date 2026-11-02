@@ -23,7 +23,8 @@ const toasts = (on: On): string[] => {
 }
 
 describe('la sezione HOOKS', () => {
-  test('mostra gli hook della sessione per evento, con il nome dato a hook-switch', async ($, on) => {
+  // Il primo test del file carica il mod: su una macchina carica supera i 5 secondi di partenza.
+  test('mostra gli hook della sessione per evento, con il nome dato a hook-switch', { timeoutMs: 20_000 }, async ($, on) => {
     fakeEngine(on)
     await start($)
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })

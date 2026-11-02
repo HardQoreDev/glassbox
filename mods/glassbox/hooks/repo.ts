@@ -3,10 +3,12 @@
 // ogni aggiornamento; il pannello si ridisegna solo se l'uscita è cambiata.
 import type { EngineInterface } from 'claude-code'
 
-import { NO_BRANCHES, REFS_ARGV, baseOf, branchesOf, countArgv, readFetchHead, readReflog, readRefs, reflogArgv, syncTimes } from './branches'
+import { NO_BRANCHES, REFS_ARGV, baseOf, branchesOf, countArgv, readCounts, readFetchHead, readReflog, readRefs, reflogArgv, syncTimes } from './branches'
 import type { Branches, RawRef, SyncTime } from './branches'
 import { LOG_ARGV, layout, parseLog } from './graph'
 import type { GraphRow } from './graph'
+import { TAGS_ARGV, lsRemoteArgv, readRemoteTags, readTags } from './tags'
+import type { Tag } from './tags'
 import { parseGit, parseNumstat, relative, rollCounts, rollUp } from './vendor/filetree'
 import type { Branch } from './vendor/filetree'
 
@@ -20,6 +22,12 @@ export type Repo = {
   rows: GraphRow[]
   // Il principale e i branch attivi, per la vista semplice.
   branches: Branches
+  // I tag, dal più recente.
+  tags: Tag[]
+  // I remoti, da `git remote`.
+  remotes: string[]
+  // Il commit su cui sta HEAD.
+  head: string
   // La cartella di casa, per mostrare i percorsi con ~.
   home: string
   branch: Branch | null
@@ -37,6 +45,9 @@ export const repo: Repo = {
   prefix: '',
   rows: [],
   branches: NO_BRANCHES,
+  tags: [],
+  remotes: [],
+  head: '',
   home: '',
   branch: null,
   git: {},
@@ -58,9 +69,10 @@ let reflogsTop = ''
 // FETCH_HEAD com'era all'ultima lettura: si rilegge quando cambia l'ora.
 let fetchHead = { path: '', mtimeMs: 0, text: '' }
 
-function git($: EngineInterface, args: readonly string[]) {
+/** git nel repo della sessione, senza prendere il lock dell'indice. */
+export function git($: EngineInterface, args: readonly string[], timeoutMs = 15_000) {
   return $.process.run(['git', '--no-optional-locks', '-C', repo.top, ...args], {
-    timeoutMs: 15_000,
+    timeoutMs,
     env: { GIT_OPTIONAL_LOCKS: '0' },
   })
 }
@@ -71,7 +83,7 @@ async function load($: EngineInterface): Promise<boolean> {
   const top = await $.process.run(['git', '-C', repo.root, 'rev-parse', '--show-toplevel'], { timeoutMs: 10_000 })
   if (top.exitCode !== 0) {
     const changed = repo.top !== '' || last !== 'no repo'
-    Object.assign(repo, { top: '', prefix: '', rows: [], branches: NO_BRANCHES, branch: null, git: {}, counts: {}, diff: {}, error: '' })
+    Object.assign(repo, { top: '', prefix: '', rows: [], branches: NO_BRANCHES, tags: [], remotes: [], head: '', branch: null, git: {}, counts: {}, diff: {}, error: '' })
     last = 'no repo'
     return changed
   }
@@ -79,13 +91,15 @@ async function load($: EngineInterface): Promise<boolean> {
   repo.top = top.stdout.trim()
   const rel = relative(repo.top, repo.root)
   repo.prefix = rel === '' ? '' : `${rel}/`
-  const [remotes, log, status, numstat, refs, commonDir] = await Promise.all([
+  const [remotes, log, status, numstat, refs, commonDir, tags, head] = await Promise.all([
     git($, ['remote', '-v']),
     git($, LOG_ARGV.slice(1)),
     git($, ['status', '--porcelain=v1', '-z', '-b', '--ignored=matching', '--untracked-files=normal']),
     git($, ['diff', '--numstat', '-z', 'HEAD']),
     git($, REFS_ARGV),
     git($, ['rev-parse', '--path-format=absolute', '--git-common-dir']),
+    git($, TAGS_ARGV),
+    git($, ['rev-parse', '--verify', '-q', 'HEAD']),
   ])
   // Quanti commit ogni branch ha in più e in meno del principale: si chiede
   // dopo, perché serve sapere qual è; un git vecchio non lo sa dire.
@@ -105,13 +119,17 @@ async function load($: EngineInterface): Promise<boolean> {
   ].map(([name, url]) => ({ name, url }))
   const names = remoteList.map(r => r.name)
   const syncs = await lastSyncs($, refList, commonDir.exitCode === 0 ? commonDir.stdout.trim() : '', remoteList)
-  const raw = [remotes.stdout, log.stdout, log.stderr, status.stdout, numstat.stdout, refs.stdout, countsOut, JSON.stringify([...syncs])].join('\x00\x01')
+  const tagsOut = tags.exitCode === 0 ? tags.stdout : ''
+  const raw = [remotes.stdout, log.stdout, log.stderr, status.stdout, numstat.stdout, refs.stdout, countsOut, JSON.stringify([...syncs]), tagsOut, head.stdout].join('\x00\x01')
   if (raw === last) return false
   last = raw
 
   const commits = log.exitCode === 0 ? parseLog(log.stdout, names) : []
   repo.rows = layout(commits)
   repo.branches = branchesOf(refList, countsOut, base, names, syncs)
+  repo.tags = readTags(tagsOut, readCounts(countsOut))
+  repo.remotes = names
+  repo.head = head.exitCode === 0 ? head.stdout.trim() : ''
   repo.error = log.exitCode === 0 ? '' : log.stderr.trim().split('\n')[0] ?? ''
   const parsed = parseGit(status.stdout, repo.root, repo.prefix)
   repo.branch = parsed.branch
@@ -159,6 +177,46 @@ async function lastSyncs(
 
   const logged = new Map([...reflogs].flatMap(([ref, v]) => (v.entry ? [[ref, v.entry] as const] : [])))
   return syncTimes(refs, logged, readFetchHead(fetchHead.text, remotes), Math.floor(fetchHead.mtimeMs / 1000))
+}
+
+/**
+ * I tag sul remoto, letti solo quando si chiede: è una chiamata in rete. Il
+ * remoto è quello del principale, se no origin, se no il primo.
+ */
+export const remoteTags = {
+  // Il repo e il remoto letti; `at` in millisecondi, 0 se mai.
+  top: '',
+  remote: '',
+  at: 0,
+  tags: undefined as Map<string, string> | undefined,
+  error: '',
+  isChecking: false,
+}
+
+/** Il remoto con cui si confrontano i tag. */
+export function tagsRemote(): string {
+  const fromBase = repo.remotes.find(r => repo.branches.baseName.startsWith(`${r}/`))
+  return fromBase ?? (repo.remotes.includes('origin') ? 'origin' : (repo.remotes[0] ?? ''))
+}
+
+/** Chiede al remoto i suoi tag; `true` quando la risposta cambia quello che si mostra. */
+export async function checkRemoteTags($: EngineInterface, now: number): Promise<boolean> {
+  const remote = tagsRemote()
+  if (!repo.top || !remote || remoteTags.isChecking) return false
+  if (remoteTags.top !== repo.top || remoteTags.remote !== remote) Object.assign(remoteTags, { top: repo.top, remote, at: 0, tags: undefined, error: '' })
+  remoteTags.isChecking = true
+  try {
+    // Mai una domanda: senza credenziali pronte la chiamata fallisce e basta.
+    const out = await $.process.run(['git', '-C', repo.top, ...lsRemoteArgv(remote)], { timeoutMs: 20_000, env: { GIT_TERMINAL_PROMPT: '0' } })
+    if (out.exitCode === 0) Object.assign(remoteTags, { tags: readRemoteTags(out.stdout), error: '' })
+    else remoteTags.error = out.stderr.trim().split('\n').at(-1) ?? `exit ${out.exitCode}`
+  } catch (err) {
+    remoteTags.error = err instanceof Error ? err.message : String(err)
+  } finally {
+    remoteTags.isChecking = false
+    remoteTags.at = now
+  }
+  return true
 }
 
 /**

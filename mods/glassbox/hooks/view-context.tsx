@@ -18,14 +18,17 @@ const TONE_COLOR = { user: INPUT_RAIL, assistant: '#c9c9c9', system: '#d8c8f0' }
 type Row = { text: string; tone?: Tone }
 
 // Le righe di schermo dell'ultimo disegno: si rifanno solo quando cambiano il
-// testo, la larghezza o `wrap`.
-let cache: { version: number; visible: number; wrap: boolean; rows: Row[]; width: number } | undefined
+// testo, la larghezza o `wrap`. `starts` dà la prima riga di schermo di ogni riga del testo.
+type Screen = { rows: Row[]; width: number; starts: number[] }
+let cache: (Screen & { version: number; visible: number; wrap: boolean }) | undefined
 
-function screen(visible: number): { rows: Row[]; width: number } {
+function screen(visible: number): Screen {
   if (cache && cache.version === doc.version && cache.visible === visible && cache.wrap === doc.wrap) return cache
   const rows: Row[] = []
+  const starts: number[] = []
   let width = 0
   for (const l of doc.lines) {
+    starts.push(rows.length)
     // I titoli stanno in una riga; le note vanno sempre a capo.
     if (l.tone !== undefined && l.tone !== 'note') rows.push(l)
     else if (l.tone === undefined && !doc.wrap) {
@@ -34,7 +37,7 @@ function screen(visible: number): { rows: Row[]; width: number } {
       width = Math.max(width, len(text))
     } else for (const text of wrapText(clean(l.text), visible)) rows.push({ text, ...(l.tone ? { tone: l.tone } : {}) })
   }
-  cache = { version: doc.version, visible, wrap: doc.wrap, rows, width }
+  cache = { version: doc.version, visible, wrap: doc.wrap, rows, width, starts }
   return cache
 }
 
@@ -46,7 +49,13 @@ export function contextLayout(width: number, bodyRows: number): ContextLayout {
   const s = screen(visible)
   const maxLeft = doc.wrap ? 0 : Math.max(0, s.width - visible)
   const rows = Math.max(1, bodyRows - (maxLeft > 0 ? 3 : 2))
-  return { rows, visible, maxTop: Math.max(0, s.rows.length - rows), maxLeft, sliderRow: maxLeft > 0 ? 2 + rows : -1 }
+  const maxTop = Math.max(0, s.rows.length - rows)
+  // Aperta su un blocco: la finestra parte dal suo titolo, una volta sola.
+  if (doc.focus !== undefined) {
+    doc.offset = Math.min(s.starts[doc.focus] ?? 0, maxTop)
+    doc.focus = undefined
+  }
+  return { rows, visible, maxTop, maxLeft, sliderRow: maxLeft > 0 ? 2 + rows : -1 }
 }
 
 export type ContextActions = {

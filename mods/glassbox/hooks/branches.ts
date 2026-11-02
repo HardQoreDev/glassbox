@@ -16,8 +16,22 @@ export const REFS_ARGV = [
   'refs/remotes',
 ] as const
 
-/** Per ogni branch quanti commit ha in più e in meno di `hash`, il commit del principale. */
-export const countArgv = (hash: string): string[] => ['for-each-ref', `--format=%(refname)${F}%(ahead-behind:${hash})${R}`, 'refs/heads', 'refs/remotes']
+/** Per ogni branch e ogni tag quanti commit ha in più e in meno di `hash`, il commit del principale. */
+export const countArgv = (hash: string): string[] => ['for-each-ref', `--format=%(refname)${F}%(ahead-behind:${hash})${R}`, 'refs/heads', 'refs/remotes', 'refs/tags']
+
+/** L'uscita di `countArgv`: per ref, i commit in più e in meno. */
+export const readCounts = (counts: string): Map<string, { ahead: number; behind: number }> =>
+  new Map(
+    counts
+      .split(R)
+      .map(record => record.replace(/^\n/, '').split(F))
+      .filter((parts): parts is [string, string] => parts.length === 2)
+      .map(([ref, pair]) => {
+        const [ahead = NaN, behind = NaN] = pair.split(' ').map(Number)
+        return [ref, { ahead, behind }] as const
+      })
+      .filter(([, c]) => Number.isFinite(c.ahead) && Number.isFinite(c.behind)),
+  )
 
 export type RawRef = {
   ref: string
@@ -142,17 +156,7 @@ export function branchesOf(
   syncs: ReadonlyMap<string, SyncTime> = new Map(),
 ): Branches {
   if (!base) return NO_BRANCHES
-  const counted = new Map(
-    counts
-      .split(R)
-      .map(record => record.replace(/^\n/, '').split(F))
-      .filter((parts): parts is [string, string] => parts.length === 2)
-      .map(([ref, pair]) => {
-        const [ahead, behind] = pair.split(' ').map(Number)
-        return [ref, { ahead, behind }] as const
-      })
-      .filter(([, c]) => Number.isFinite(c.ahead) && Number.isFinite(c.behind)),
-  )
+  const counted = readCounts(counts)
 
   const branches = refs.filter(r => r.symref === '' && (r.ref.startsWith('refs/heads/') || r.ref.startsWith('refs/remotes/')))
   const locals = branches.filter(r => r.ref.startsWith('refs/heads/'))

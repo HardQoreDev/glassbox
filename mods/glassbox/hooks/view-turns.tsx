@@ -2,11 +2,13 @@
 // hooks/turn-inspector.tsx) spezzato in righe, perché la sezione ne mostra
 // solo quante ne stanno. Input in viola, output in grigio. Le voci della
 // legenda e i blocchi di un turno aperto aprono quello che entra nel
-// contesto; la tendina `stats` mostra in cima i numeri e i consigli.
-import { partOf } from './context'
-import type { Part } from './context'
-import { statsOf } from './stats'
-import type { Level, Share } from './stats'
+// contesto; la tendina `stats` mostra in cima, in cinque viste, i numeri e i
+// consigli per tenere il contesto snello.
+import type { Kind } from './anatomy'
+import { partAt, partOf, sentMessages } from './context'
+import type { Focus, Part } from './context'
+import { TABS, statsOf } from './stats'
+import type { Heavy, Level, Seen, Share, Slice, Stat, Tab, Tip } from './stats'
 import { turns } from './turns-state'
 import { cell, fit, len, wrapText } from './ui'
 import type { Line } from './ui'
@@ -35,8 +37,21 @@ const LEGEND: [Part, string][] = [
   ['output', BAR.output],
 ]
 const LEVEL = { warn: { mark: '! ', color: '#ffb000' }, info: { mark: '· ', color: '#59a4f9' }, good: { mark: '✓ ', color: '#4ade80' } } satisfies Record<Level, unknown>
-// La colonna dei nomi nella tendina.
+// La colonna dei nomi nella tendina, e fin dove si allarga per le barre.
 const LABEL_W = 12
+const NAME_MAX = 18
+// Le fette del contesto nella vista fill: il nome e il colore.
+const SLICE: Record<Slice['kind'], { name: string; color: string }> = {
+  preloaded: { name: 'preloaded', color: '#7c6aa8' },
+  results: { name: 'tool results', color: '#a78bfa' },
+  calls: { name: 'tool calls', color: '#5eead4' },
+  replies: { name: 'replies', color: '#c9c9c9' },
+  thinking: { name: 'thinking', color: '#8a8f98' },
+  prompts: { name: 'your prompts', color: '#f0abfc' },
+  reminders: { name: 'reminders', color: '#59a4f9' },
+}
+const NOTHING_YET = 'Nothing yet: the numbers come after the first answer.'
+const KIND_ICON: Record<Kind, string> = { results: '⇠', calls: '⚒', replies: '¶', thinking: '✻', prompts: '❯', reminders: '⚑' }
 
 /** Il testo accanto al titolo: quanto contesto è in uso, e la percentuale. */
 export const turnsInfo = (): { text: string; color?: string; dim?: boolean }[] => {
@@ -50,33 +65,70 @@ export const turnsInfo = (): { text: string; color?: string; dim?: boolean }[] =
   ]
 }
 
-/** La tendina: i numeri della sessione, il contesto per categoria, gli strumenti, i consigli. */
-export function statsLines(width: number): Line[] {
-  const s = statsOf(turns.ledger, turns.calls, turns.breakdown)
+/** Quello che la tendina sa oltre al registro: i messaggi dell'ultima richiesta vista partire, i subagent, gli skill. */
+function seenNow(): Seen {
+  const lastDone = [...turns.ledger.turns].reverse().find(t => t.input !== undefined)
+  const messages = lastDone ? sentMessages(lastDone.n) : undefined
+  return { ...(lastDone && messages ? { sent: { n: lastDone.n, messages } } : {}), agents: turns.agents, skills: turns.skills }
+}
+
+export type StatsActions = {
+  /** Mostra un'altra vista della tendina. */
+  pick: (tab: Tab) => void
+  /** Apre la richiesta `n` sul blocco `at`. */
+  open: (n: number, at: Focus) => void
+}
+
+/** La tendina: le viste in cima, poi i numeri, le barre e i consigli della vista scelta. */
+export function statsLines(width: number, act: StatsActions): Line[] {
+  const s = statsOf(turns.ledger, turns.calls, turns.breakdown, seenNow())
+  const tab = turns.statsTab
   const lines: Line[] = []
   const title = (text: string): Line => el => (
     <el.Text color={INPUT_RAIL} bold>
       {fit(text, width)}
     </el.Text>
   )
-  for (const r of s.rows) {
-    const value = fit(r.value, Math.max(4, width - LABEL_W))
-    lines.push(el => (
-      <el.Box key={`s:${r.label}`} flexDirection="row" height={1} overflow="hidden">
-        <el.Text dimColor>{cell(r.label, LABEL_W)}</el.Text>
-        <el.Text color={r.level && r.level !== 'good' ? LEVEL[r.level].color : undefined}>{value}</el.Text>
-      </el.Box>
-    ))
+  const note = (text: string) => wrapText(text, Math.max(8, width)).forEach(t => lines.push(el => <el.Text dimColor italic>{t}</el.Text>))
+
+  // Le viste, con un punto dove c'è un avviso.
+  const warned = new Set(s.tips.filter(t => t.level === 'warn').map(t => t.tab))
+  lines.push(el => (
+    <el.Box key="stats:tabs" flexDirection="row" height={1} overflow="hidden">
+      {TABS.flatMap((id, i) => [
+        ...(i ? [<el.Text>{'  '}</el.Text>] : []),
+        <el.Button key={`stats-tab:${id}`} plain label={`stats: ${id}`} onPress={() => act.pick(id)}>
+          <el.Text color={id === tab ? INPUT_RAIL : undefined} bold={id === tab} underline={id === tab} dimColor={id !== tab}>
+            {id}
+          </el.Text>
+        </el.Button>,
+        ...(warned.has(id) ? [<el.Text color={LEVEL.warn.color}>•</el.Text>] : []),
+      ])}
+    </el.Box>
+  ))
+
+  const statRows = (list: readonly Stat[]) => {
+    for (const r of list) {
+      const value = fit(r.value, Math.max(4, width - LABEL_W))
+      lines.push(el => (
+        <el.Box key={`s:${r.label}`} flexDirection="row" height={1} overflow="hidden">
+          <el.Text dimColor>{cell(r.label, LABEL_W)}</el.Text>
+          <el.Text color={r.level && r.level !== 'good' ? LEVEL[r.level].color : undefined}>{value}</el.Text>
+        </el.Box>
+      ))
+    }
   }
-  // Una riga per voce: il nome, una barra lunga quanto pesa, il valore.
+  // Una riga per voce: il nome, una barra lunga quanto pesa, il valore. La
+  // colonna dei nomi si allarga fin dove serve, entro un limite.
   const shares = (list: readonly Share[], of: number, value: (x: Share) => string, size: (x: Share) => number, color: string) => {
-    const barW = Math.max(4, Math.min(16, width - LABEL_W - 14))
+    const nameW = Math.max(LABEL_W, Math.min(NAME_MAX, Math.max(...list.map(x => len(x.name))) + 1))
+    const barW = Math.max(4, Math.min(16, width - nameW - 14))
     for (const x of list) {
       const filled = of > 0 ? Math.max(1, Math.round((size(x) / of) * barW)) : 0
-      const text = fit(` ${value(x)}`, Math.max(4, width - LABEL_W - barW))
+      const text = fit(` ${value(x)}`, Math.max(4, width - nameW - barW))
       lines.push(el => (
         <el.Box key={`s:${x.name}`} flexDirection="row" height={1} overflow="hidden">
-          <el.Text>{`${cell(x.name, LABEL_W - 1)} `}</el.Text>
+          <el.Text>{`${cell(x.name, nameW - 1)} `}</el.Text>
           <el.Text color={color}>{'█'.repeat(Math.min(barW, filled))}</el.Text>
           <el.Text color={BAR.free}>{'░'.repeat(Math.max(0, barW - filled))}</el.Text>
           <el.Text dimColor>{text}</el.Text>
@@ -84,33 +136,122 @@ export function statsLines(width: number): Line[] {
       ))
     }
   }
-  const window = turns.breakdown?.rawMaxTokens ?? turns.ledger.window ?? 0
-  if (s.categories.length > 0) {
-    lines.push(title('by category'))
-    shares(s.categories, window, x => fmtTokens(x.tokens), x => x.tokens, BAR.history)
+  const tipLines = (list: readonly Tip[]) => {
+    for (const tip of list) {
+      const { mark, color } = LEVEL[tip.level]
+      wrapText(tip.text, Math.max(8, width - 2)).forEach((text, i) => {
+        lines.push(el => (
+          <el.Box flexDirection="row" height={1} overflow="hidden">
+            <el.Text color={color}>{i === 0 ? mark : '  '}</el.Text>
+            <el.Text>{text}</el.Text>
+          </el.Box>
+        ))
+      })
+    }
   }
-  if (s.tools.length > 0) {
-    lines.push(title('most used tools · calls · tokens in context'))
-    const most = Math.max(...s.tools.map(x => x.count ?? 0))
-    shares(s.tools, most, x => `${x.count}${x.failed ? ` (${x.failed}✗)` : ''}${x.tokens > 0 ? ` · ${fmtTokens(x.tokens)}` : ''}`, x => x.count ?? 0, BAR.added)
+  const own = s.tips.filter(t => t.tab === tab)
+  const ownTips = () => {
+    if (own.length === 0) return
+    lines.push(title('tips'))
+    tipLines(own)
   }
-  lines.push(title('tips'))
-  for (const tip of s.tips) {
-    const { mark, color } = LEVEL[tip.level]
-    wrapText(tip.text, Math.max(8, width - 2)).forEach((text, i) => {
+
+  if (tab === 'health') {
+    statRows(s.rows.health)
+    lines.push(title('tips'))
+    // Tutti i consigli, prima gli avvisi.
+    const order: Record<Level, number> = { warn: 0, info: 1, good: 2 }
+    tipLines([...s.tips].sort((a, b) => order[a.level] - order[b.level]))
+  } else if (tab === 'fill') {
+    const f = s.fill
+    if (!f) note('What fills the context shows once Glassbox has seen a request go out: it reads the messages as they are sent.')
+    else {
+      const approx = f.isScaled ? '' : '~'
+      lines.push(title(`what fills #${f.n} · ${approx}${fmtTokens(Math.round(f.total))}`))
+      // Le fette in una barra sola, poi una riga ciascuna con il suo colore.
+      const cells = barCells(f.slices.map(x => x.tokens), f.total, width)
       lines.push(el => (
-        <el.Box flexDirection="row" height={1} overflow="hidden">
-          <el.Text color={color}>{i === 0 ? mark : '  '}</el.Text>
-          <el.Text>{text}</el.Text>
-        </el.Box>
+        <el.Text>
+          {f.slices.map((x, i) => (
+            <el.Text color={SLICE[x.kind].color}>{'█'.repeat(cells[i] ?? 0)}</el.Text>
+          ))}
+        </el.Text>
       ))
-    })
+      for (const x of f.slices) {
+        const { name, color } = SLICE[x.kind]
+        const part = (x.tokens / Math.max(1, f.total)) * 100
+        const share = (part > 0 && part < 1 ? '<1%' : `${Math.round(part)}%`).padStart(4)
+        const tokens = `${x.kind === 'preloaded' ? '' : '~'}${fmtTokens(Math.round(x.tokens))}`
+        lines.push(el => (
+          <el.Box key={`s:slice:${x.kind}`} flexDirection="row" height={1} overflow="hidden">
+            <el.Text color={color}>{'■ '}</el.Text>
+            <el.Text>{cell(name, LABEL_W)}</el.Text>
+            <el.Text>{share}</el.Text>
+            <el.Text dimColor>{fit(`  ${tokens}`, Math.max(4, width - LABEL_W - 6))}</el.Text>
+          </el.Box>
+        ))
+      }
+      if (f.heaviest.length > 0) {
+        lines.push(title('heaviest · click to open'))
+        const right = (x: Heavy) => `${fmtTokens(Math.round(x.tokens))}${x.since !== undefined ? ` #${x.since}` : ''}`
+        const rightW = Math.max(...f.heaviest.map(x => len(right(x))))
+        f.heaviest.forEach((x, i) => {
+          const labelW = Math.max(4, width - rightW - 4)
+          const label = cell(`${KIND_ICON[x.kind]} ${x.label}`, labelW)
+          lines.push(el => (
+            <el.Box key={`s:heavy:${i}`} flexDirection="row" height={1} overflow="hidden">
+              <el.Button key={`stats-heavy:${i}`} plain label={`Open ${x.label} in #${f.n}`} onPress={() => act.open(f.n, { message: x.message, block: x.block })}>
+                <el.Text color={SLICE[x.kind].color}>{label}</el.Text>
+              </el.Button>
+              <el.Text dimColor>{`  ${cell(right(x), rightW, 'right')}`}</el.Text>
+            </el.Box>
+          ))
+        })
+      }
+    }
+    statRows(s.rows.fill)
+    if (s.categories.length > 0) {
+      lines.push(title('by category · as /context counts it'))
+      const window = turns.breakdown?.rawMaxTokens ?? turns.ledger.window ?? 0
+      shares(s.categories, window, x => fmtTokens(x.tokens), x => x.tokens, BAR.history)
+    }
+    ownTips()
+  } else if (tab === 'waste') {
+    if (s.rows.waste.length === 0) note('What could go shows once Glassbox has seen a request go out: old, repeated and failed tool results, tools and skills loaded and never used.')
+    statRows(s.rows.waste)
+    ownTips()
+  } else if (tab === 'flow') {
+    if (s.rows.flow.length === 0) note(NOTHING_YET)
+    statRows(s.rows.flow)
+    ownTips()
+  } else {
+    if (s.rows.tools.length === 0 && s.tools.length === 0) note(NOTHING_YET)
+    statRows(s.rows.tools)
+    if (s.tools.length > 0) {
+      lines.push(title('most used · calls · results in context'))
+      const most = Math.max(...s.tools.map(x => x.count ?? 0))
+      shares(
+        s.tools,
+        most,
+        x => `${x.count}${x.failed ? ` (${x.failed}✗)` : ''}${x.tokens > 0 ? ` · ${fmtTokens(x.tokens)}` : ''}${x.tokens > 0 && x.results ? ` · ${fmtTokens(Math.round(x.tokens / x.results))} each` : ''}`,
+        x => x.count ?? 0,
+        BAR.added,
+      )
+    }
+    ownTips()
   }
   lines.push(el => <el.Text color={INPUT_RAIL} dimColor>{'─'.repeat(width)}</el.Text>)
   return lines
 }
 
-export function turnLines(width: number, toggle: (n: number) => void, show: (t: Turn, part: Part) => void): Line[] {
+export type TurnActions = {
+  toggle: (n: number) => void
+  show: (t: Turn, part: Part, at?: Focus) => void
+  pick: (tab: Tab) => void
+}
+
+export function turnLines(width: number, act: TurnActions): Line[] {
+  const { toggle, show } = act
   const l = turns.ledger
   const window = l.window
 
@@ -129,7 +270,16 @@ export function turnLines(width: number, toggle: (n: number) => void, show: (t: 
   const legendW = LEGEND.reduce((w, [part], i) => w + (i ? 2 : 0) + 2 + len(part), 0)
   const which = lastDone ? `#${lastDone.n}` : ''
   const lines: Line[] = [
-    ...(turns.showStats ? statsLines(width) : []),
+    ...(turns.showStats
+      ? statsLines(width, {
+          pick: act.pick,
+          open: (n, at) => {
+            const t = l.turns.find(x => x.n === n)
+            const messages = sentMessages(n)
+            if (t && messages) show(t, partAt(messages, at.message), at)
+          },
+        })
+      : []),
     el => (
       <el.Text>
         {bar(lastDone, width).map(s => (

@@ -38,9 +38,22 @@ export const COUNTS = [
   ['refs/remotes/origin/HEAD', '0 0'],
   ['refs/remotes/origin/feature', '1 2'],
   ['refs/remotes/origin/main', '0 0'],
+  ['refs/tags/v1.1', '0 0'],
+  ['refs/tags/exp', '1 2'],
+  ['refs/tags/v1.0', '0 3'],
 ]
   .map(([name, pair]) => `${name}${F}${pair}${R}\n`)
   .join('')
+
+// I tag dal più recente: v1.1 annotato su HEAD, exp annotato sul ramo
+// feature, fuori dal principale; v1.0 leggero sul primo commit.
+export const TAGS = [
+  ref('refs/tags/v1.1', 'tag', 'tag11', 'c3', 'tag11', 'c3', '1761800000', 'Giulio', '', 'Merge feature', 'Release 1.1'),
+  ref('refs/tags/exp', 'tag', 'tagexp', 'c1b', 'tagexp', 'c1b', '1761600000', 'Ada', '', 'Lavoro sul ramo', 'Esperimento'),
+  ref('refs/tags/v1.0', 'commit', 'c1', '', 'c1', '', '1761000000', '', 'Giulio', '', 'Primo commit'),
+].join('')
+// I tag sul remoto: v1.1 uguale, exp su un altro oggetto, v1.0 mancante.
+export const REMOTE_TAGS = { out: 'tag11\trefs/tags/v1.1\nother\trefs/tags/exp\n', calls: 0 }
 
 // L'ultima voce del reflog dei branch remoti: main spostato da un fetch,
 // feature da un push. L'ultimo fetch, dopo, ha visto main dov'è ora e
@@ -52,7 +65,11 @@ const REFLOG: Record<string, string> = {
 export const FETCH_MS = 1761900000_000
 const FETCH_HEAD = "c3\t\tbranch 'main' of example.com:me/r\nc1a\tnot-for-merge\tbranch 'feature' of example.com:me/r\n"
 
-const STATUS = ['## main...origin/main [ahead 1]', ' M src/app.ts', '?? notes.md', '!! node_modules/', ''].join('\0')
+export const STATUS = ['## main...origin/main [ahead 1]', ' M src/app.ts', '?? notes.md', '!! node_modules/', ''].join('\0')
+// Quello che `git status` risponde adesso: un comando del test lo cambia.
+export const GIT = { status: STATUS }
+// I file come sono nei commit, per `git cat-file`: `<commit>:<percorso>`.
+export const COMMITTED: Record<string, string> = {}
 const NUMSTAT = '3\t1\tsrc/app.ts\0'
 
 const entry = (name: string, kind: 'dir' | 'file'): FsEntry => ({ name, kind, size: 10, mtimeMs: 1, isLink: false })
@@ -149,6 +166,8 @@ export const FILES: Record<string, string> = {
   '/r/.git/FETCH_HEAD': FETCH_HEAD,
 }
 export const PENDING: Record<string, string> = {}
+// Quello che fa il prossimo comando Bash, come un `sed -i`.
+export const SHELL: { run?: () => void } = {}
 // I comandi che non partono, come `code` dove VS Code non c'è.
 export const MISSING = new Set<string>()
 
@@ -219,18 +238,29 @@ export function fakeEngine(on: On, opened: string[] = []) {
     if (e.argv[0] === 'wslpath') return ok(`\\\\wsl.localhost\\Ubuntu${String(e.argv[2]).replaceAll('/', '\\')}\n`)
     if (e.argv[0] === 'uname') return ok('Linux\n')
     const args = e.argv.join(' ')
-    if (args.includes('for-each-ref')) return ok(args.includes('ahead-behind') ? COUNTS : REFS)
+    if (args.includes('for-each-ref')) return ok(args.includes('ahead-behind') ? COUNTS : args.includes('refs/tags') ? TAGS : REFS)
+    if (args.includes(' ls-remote ')) {
+      REMOTE_TAGS.calls += 1
+      return ok(REMOTE_TAGS.out)
+    }
+    if (args.includes('rev-parse --verify')) return ok('c3\n')
     if (args.includes(' reflog ')) return ok(REFLOG[String(e.argv.at(-2))] ?? '')
     if (args.includes('--git-common-dir')) return ok('/r/.git\n')
     if (args.includes('rev-parse')) return ok('/r\n')
     if (args.includes(' remote')) return ok('origin\tgit@example.com:me/r.git (fetch)\norigin\tgit@example.com:me/r.git (push)\n')
     if (args.includes(' log ')) return ok(LOG)
-    if (args.includes(' status ')) return ok(STATUS)
+    if (args.includes(' status ')) return ok(GIT.status)
+    if (args.includes(' cat-file ')) {
+      const spec = String(e.argv.at(-1))
+      if (spec in COMMITTED) return ok(COMMITTED[spec] ?? '')
+      return { value: { exitCode: 128, stdout: '', stderr: `fatal: path '${spec}' does not exist`, isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (args.includes(' diff ')) return ok(NUMSTAT)
     return ok('')
   })
   on('fs.stat', (_, e) => {
     const path = String((e as { path?: string }).path)
+    if (path in FILES && path !== '/r/.git/FETCH_HEAD') return { value: { kind: 'file', size: FILES[path]?.length ?? 0, mtimeMs: 1, isLink: false } } as never
     if (path !== '/r/.git/FETCH_HEAD') throw new Error(`ENOENT: ${path}`)
     return { value: { kind: 'file', size: FETCH_HEAD.length, mtimeMs: FETCH_MS } } as never
   })
@@ -239,8 +269,14 @@ export function fakeEngine(on: On, opened: string[] = []) {
     if (!(path in FILES)) throw new Error(`ENOENT: ${path}`)
     return { value: FILES[path] } as never
   })
-  // Lo strumento scrive quello che il test ha messo in PENDING per quel file.
+  // Lo strumento scrive quello che il test ha messo in PENDING per quel file;
+  // un comando Bash fa quello che il test ha messo in SHELL.
   on('tool.call', async (_, e) => {
+    if (e.tool === 'Bash') {
+      const run = SHELL.run
+      delete SHELL.run
+      run?.()
+    }
     const path = (e as { file_path?: string }).file_path
     if (path !== undefined && path in PENDING) {
       FILES[path] = PENDING[path] ?? ''

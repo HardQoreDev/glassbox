@@ -7,6 +7,7 @@ import type { EngineInterface, On, SessionContextBreakdown, ToolCallInput, ToolC
 import { pruneContext, recordChunk, recordSent, registerContext, resetContext } from './context'
 import { chunk, createLedger, promptStarted, stepEnded, stepStarted, systemTokens, toolAnswered } from './vendor/turns'
 import type { Ledger, Turn } from './vendor/turns'
+import type { AgentUse, Tab } from './stats'
 import { redraw } from './ui'
 
 const KEEP = 200
@@ -18,12 +19,17 @@ export const turns = {
   expanded: new Set<number>(),
   // Segue l'ultimo turno: la sezione resta in fondo finché non la scorri su.
   follow: true,
-  // La tendina delle statistiche in cima alla sezione.
+  // La tendina delle statistiche in cima alla sezione, e la sua vista.
   showStats: false,
+  statsTab: 'health' as Tab,
   // Il contesto per categoria come lo divide /context, dopo l'ultimo turno.
   breakdown: undefined as SessionContextBreakdown | undefined,
   // Le chiamate agli strumenti della sessione, riuscite e fallite.
   calls: new Map<string, { count: number; failed: number }>(),
+  // Le richieste dei subagent, per agente: il loro contesto resta fuori da questo.
+  agents: new Map<string, AgentUse>(),
+  // Gli skill caricati nella sessione.
+  skills: new Set<string>(),
 }
 
 const safeJson = (v: unknown): string => {
@@ -42,6 +48,8 @@ export async function startTurns($: EngineInterface): Promise<void> {
   turns.follow = true
   turns.breakdown = undefined
   turns.calls.clear()
+  turns.agents.clear()
+  turns.skills.clear()
   resetContext()
   const usage = await $.session.usage().catch(() => undefined)
   if (usage) turns.ledger.window = usage.context.window
@@ -57,6 +65,18 @@ export const toolDone = (e: ToolCallInput, r: ToolCallResult): void => {
   toolAnswered(turns.ledger, e.tool, text.length, isFailed)
   const c = turns.calls.get(e.tool) ?? { count: 0, failed: 0 }
   turns.calls.set(e.tool, { count: c.count + 1, failed: c.failed + (isFailed ? 1 : 0) })
+  const skill = (e as unknown as { skill?: unknown }).skill
+  if (e.tool === 'Skill' && typeof skill === 'string' && !isFailed) turns.skills.add(skill.replace(/^\//, ''))
+}
+
+type StepUsage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
+
+/** Una richiesta di un subagent: quanto ha mandato e quanto ha risposto, nel suo contesto. */
+export function agentStep(id: string, usage: StepUsage | null | undefined): void {
+  if (!usage) return
+  const input = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+  const a = turns.agents.get(id) ?? { requests: 0, peak: 0, input: 0, output: 0 }
+  turns.agents.set(id, { requests: a.requests + 1, peak: Math.max(a.peak, input + usage.output_tokens), input: a.input + input, output: a.output + usage.output_tokens })
 }
 
 export const registerTurns = (on: On): void => {
@@ -69,7 +89,11 @@ export const registerTurns = (on: On): void => {
 
   // ogni richiesta del ciclo principale è un turno; il suo flusso dà i blocchi di output
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId !== undefined) return yield* next(e)
+    if (e.agentId !== undefined) {
+      const r = yield* next(e)
+      agentStep(e.agentId, r.usage)
+      return r
+    }
     const turn = stepStarted(turns.ledger, e.turnId, e.index, e.model, KEEP)
     turns.live = turn
     pruneContext(turns.ledger.turns[0]?.n ?? turn.n)

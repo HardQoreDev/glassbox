@@ -12,8 +12,10 @@ import { FLASH_MS, readText, refreshDirs, reveal, toggleDir, touch, tree, visibl
 import type { FileRow, Tone } from './files'
 import { openFile } from './open'
 import { closePreview, openPreview, preview, refreshPreview } from './preview'
-import { refreshRepo } from './repo'
+import { checkRemoteTags, refreshRepo, remoteTags, repo } from './repo'
 import { hooks, loadHooks, toggleHook } from './settings-hooks'
+import { shellWrites, snapshot } from './shell-writes'
+import type { ShellWrite } from './shell-writes'
 import { record } from './touched'
 import { registerTurns, startTurns, toolDone, turns } from './turns-state'
 import { fit, len, redraw } from './ui'
@@ -26,6 +28,7 @@ import { fixedHooks, hookLines, hookView, hooksInfo } from './view-hooks'
 import { contextLayout, contextLines } from './view-context'
 import type { ContextLayout } from './view-context'
 import { previewLayout, previewLines } from './view-preview'
+import { tagLines, tagView, tagsInfo } from './view-tags'
 import { titleLines } from './view-title'
 import type { PreviewLayout } from './view-preview'
 import { INPUT_RAIL, turnLines, turnsInfo } from './view-turns'
@@ -70,8 +73,8 @@ const offset: Record<SectionId, number> = { hooks: 0, graph: 0, files: 0, turns:
 let spans: { id: SectionId; from: number; to: number; max: number }[] = []
 // La vista della sezione FILE: i file modificati nella sessione, o l'albero.
 let filesView: 'touched' | 'tree' = 'touched'
-// La vista di GIT: i branch attivi appesi al principale, o ogni commit.
-let graphView: 'active' | 'full' = 'active'
+// La vista di GIT: i branch attivi appesi al principale, ogni commit, o i tag.
+let graphView: 'active' | 'full' | 'tags' = 'active'
 // Come era disposta l'anteprima di un file all'ultimo disegno: fin dove
 // scorre, e in che riga è lo slider.
 let previewAt: PreviewLayout | undefined
@@ -100,25 +103,46 @@ async function pathOf($: EngineInterface, e: ToolCallInput): Promise<string | un
 }
 
 // Fuori dal giro dello strumento, così il suo esito arriva subito al modello
-// e un errore qui non lo tocca. `before` è il file prima di una scrittura.
-async function showActivity($: EngineInterface, e: ToolCallInput, isOk: boolean, before?: string | null): Promise<void> {
+// e un errore qui non lo tocca. `before` è il file prima di una scrittura,
+// `shell` i file che un comando ha cambiato.
+async function showActivity($: EngineInterface, e: ToolCallInput, isOk: boolean, before?: string | null, shell: ShellWrite[] = []): Promise<void> {
   try {
     const tone: Tone | undefined = WRITES.has(e.tool) ? 'orange' : READS.has(e.tool) ? 'purple' : undefined
     const path = await pathOf($, e)
+    const lit: [string, Tone][] = tone && path ? [[path, tone]] : []
+    const written: string[] = []
     if (tone === 'orange' && path && isOk && before !== undefined) {
       const after = await readText($, path)
       if (after !== null && after !== before) record(path, before, after, Date.now())
-      // L'anteprima aperta su questo file si aggiorna subito, senza aspettare git.
-      if (path === preview.path && (await refreshPreview($))) redraw($)
+      written.push(path)
     }
-    if (tone && path && (await touch($, path, tone))) {
+    for (const w of shell) {
+      record(w.path, w.before, w.after, Date.now())
+      written.push(w.path)
+      lit.push([w.path, 'orange'])
+    }
+    // L'anteprima aperta su un file scritto si aggiorna subito, senza aspettare git.
+    if (written.includes(preview.path) && (await refreshPreview($))) redraw($)
+    let isLit = false
+    for (const [p, t] of lit) isLit = (await touch($, p, t)) || isLit
+    if (isLit) {
       redraw($)
       $.clock.after(FLASH_MS + 100, () => redraw($))
     }
     if (tone === 'orange' || e.tool === 'Bash') await refreshAll($)
+    // Dopo un push si rilegge cosa c'è sul remoto, se i tag si sono già guardati.
+    const command = (e as unknown as { command?: unknown }).command
+    if (e.tool === 'Bash' && typeof command === 'string' && /\bgit\b[^\n]*\bpush\b/.test(command) && remoteTags.at > 0) await recheckTags($)
   } catch (err) {
     $.ui.log(`glassbox: activity not shown: ${err}`)
   }
+}
+
+// Chiede al remoto i suoi tag e ridisegna: prima, mentre aspetta, e quando risponde.
+async function recheckTags($: EngineInterface): Promise<void> {
+  const asking = checkRemoteTags($, Date.now())
+  redraw($)
+  if (await asking) redraw($)
 }
 
 /** Divide `room` righe tra `n` sezioni aperte; il resto va alle prime. */
@@ -167,14 +191,18 @@ export const register: Register = on => {
   })
 
   // I file che Claude legge (viola) o scrive (arancio) si accendono; di quelli
-  // che scrive si contano le righe, leggendoli prima e dopo. Dopo una
-  // scrittura o un comando si rilegge il repo. La risposta va anche ai turni.
+  // che scrive si contano le righe, leggendoli prima e dopo. Un comando non
+  // dice cosa scrive: si guarda git prima e dopo, e il dopo si legge qui
+  // dentro, prima che parta lo strumento seguente. Dopo una scrittura o un
+  // comando si rilegge il repo. La risposta va anche ai turni.
   on('tool.call', async ($, e, next) => {
     const path = WRITES.has(e.tool) ? await pathOf($, e).catch(() => undefined) : undefined
     const before = path ? await readText($, path) : undefined
+    const shot = e.tool === 'Bash' ? await snapshot($).catch(() => undefined) : undefined
     const ran = await next(e)
+    const shell = shot ? await shellWrites($, shot).catch(() => []) : []
     toolDone(e, ran)
-    void showActivity($, e, ran.deny === undefined && ran.isError !== true, before)
+    void showActivity($, e, ran.deny === undefined && ran.isError !== true, before, shell)
 
     return ran
   }).catch(($, e, next) => next(e))
@@ -228,9 +256,11 @@ export const register: Register = on => {
       filesView = view
       redraw($)
     }
-    const showGraph = (view: 'active' | 'full') => {
+    const showGraph = (view: 'active' | 'full' | 'tags') => {
       if (graphView !== view) offset.graph = 0
       graphView = view
+      // I tag sul remoto si leggono la prima volta che si guardano, per repo.
+      if (view === 'tags' && remoteTags.top !== repo.top) void recheckTags($)
       redraw($)
     }
     const selectCommit = (hash: string) => {
@@ -325,7 +355,12 @@ export const register: Register = on => {
                 redraw($)
               },
             )
-          : graphLines(inner, now, selectCommit),
+          : graphView === 'tags'
+            ? tagLines(inner, now, ref => {
+                tagView.selected = tagView.selected === ref ? '' : ref
+                redraw($)
+              })
+            : graphLines(inner, now, selectCommit),
       files: () =>
         filesView === 'tree'
           ? fileLines(inner, now, fileRows, pressFile)
@@ -339,22 +374,25 @@ export const register: Register = on => {
                 }),
             ),
       turns: () =>
-        turnLines(
-          inner,
-          n => {
+        turnLines(inner, {
+          toggle: n => {
             if (turns.expanded.has(n)) turns.expanded.delete(n)
             else turns.expanded.add(n)
             redraw($)
           },
-          (t, part) =>
-            void openContext($, turns.ledger, t, part)
+          show: (t, part, at) =>
+            void openContext($, turns.ledger, t, part, at)
               .then(() => redraw($))
               .catch(err => $.ui.toast(`#${t.n} ${part}: not shown: ${err instanceof Error ? err.message : err}`)),
-        ),
+          pick: tab => {
+            turns.statsTab = tab
+            redraw($)
+          },
+        }),
     }
     const info: Record<SectionId, () => Seg[]> = {
       hooks: hooksInfo,
-      graph: graphInfo,
+      graph: () => (graphView === 'tags' ? tagsInfo() : graphInfo()),
       files: () => (filesView === 'tree' ? filesInfo() : touchedInfo()),
       turns: turnsInfo,
     }
@@ -377,7 +415,8 @@ export const register: Register = on => {
       graph: [
         { key: 'graph-view-active', label: 'active', active: graphView === 'active', press: () => showGraph('active') },
         { key: 'graph-view-full', label: 'full', active: graphView === 'full', press: () => showGraph('full') },
-        { key: 'graph-refresh', label: '↻', dim: true, press: () => void refreshAll($) },
+        { key: 'graph-view-tags', label: 'tags', active: graphView === 'tags', press: () => showGraph('tags') },
+        { key: 'graph-refresh', label: '↻', dim: true, press: () => void refreshAll($).then(() => (graphView === 'tags' ? recheckTags($) : undefined)) },
       ],
       files: [
         { key: 'files-view-touched', label: 'changed', active: filesView === 'touched', press: () => showView('touched') },
