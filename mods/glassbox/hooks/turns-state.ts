@@ -6,6 +6,7 @@ import type { EngineInterface, On, SessionContextBreakdown, ToolCallInput, ToolC
 
 import { outputOf, pruneContext, recordChunk, recordSent, registerContext, resetContext, sentMessages, toolsSeen } from './context'
 import type { ApiMessage } from './context'
+import { stepSeen } from './sessions'
 import { endRecord, recordRequest, recordTurn } from './record'
 import { chunk, createLedger, promptStarted, stepEnded, stepStarted, systemTokens, toolAnswered } from './vendor/turns'
 import type { Ledger, Turn } from './vendor/turns'
@@ -136,6 +137,8 @@ export const registerTurns = (on: On): void => {
     }
     const r = await stream.result
     stepEnded(turns.ledger, turn, r.usage, r.stopReason)
+    // La cache di questa sessione riparte da adesso: la sua riga in SESSIONS lo sa subito.
+    stepSeen(r.usage)
     if (turns.live === turn) turns.live = undefined
     redraw($)
     // Su disco, fuori dal giro: la richiesta con il contesto che ha portato.

@@ -1,6 +1,6 @@
 # Glassbox
 
-Claude Code as a glass box rather than a black box. Glassbox is a pane on the right of the session that shows what is going on around the agent: the hooks that run and a switch for each, the git branches in progress, the files the session changed and, request by request, what goes into the context, word for word, with the numbers and tips that help keep it lean.
+Claude Code as a glass box rather than a black box. Glassbox is a pane on the right of the session that shows what is going on around the agent: the hooks that run and a switch for each, the git branches in progress, the files the session changed, request by request what goes into the context, word for word, with the numbers and tips that help keep it lean, and the sessions open on the machine with the state of their prompt cache.
 
 ```
 /plugin install glassbox --marketplace HardQoreDev/glassbox
@@ -8,12 +8,13 @@ Claude Code as a glass box rather than a black box. Glassbox is a pane on the ri
 
 The repository is private: you need access to the HardQoreDev organization on GitHub and git set up on your machine (SSH or `gh auth login`). Claude Code 2.1.287 or later.
 
-## The four sections
+## The five sections
 
 - **HOOKS**: the session's hooks, grouped by event: the ones in your settings (user, project, local, `--settings`, your organization's) and the ones of the plugins you enabled. Each row shows a name that says what the hook does, where it comes from and an `ON` / `OFF` button that switches it off for this session only; click a name to see its command, its file and its timeout. The ones that cannot be switched off (`ALWAYS` and `MANAGED`) start hidden and counted next to the title; the `always` button shows and hides them. Hooks written with `hook-switch` can be switched off: see [Switching hooks off](#switching-hooks-off).
 - **GIT**: the **active** view (the default) is a simple map of the branches still in progress. The main branch (the one the remote's HEAD points to, else `main` or `master`) is on top, and the branches with commits it lacks hang below it, plus the current branch and any branch open in a worktree. Each row shows `+N −M` (commits ahead of and behind the main branch) and its remote state: `↑` to push and `↓` to pull, then `last sync` with how long ago it last synced (the last push or fetch that moved the remote branch, or the last fetch that saw it where it is), `local` if never pushed, `gone` if deleted on the remote, `remote` if it exists only there. Branches already merged are counted in one row that lists them when clicked. Click a branch to see its last commit and when it was made, the comparison in words, the last sync and the worktree it is open in. The **full** view is the commit graph of every branch, like the Source Control graph in VS Code: a coloured lane per branch, merges are `⊙`, the current commit is `○`, badges show the branches (`◎` for the current one, `☁` for remote ones), and a click on a commit shows its hash, author and date. The **tags** view lists the tags newest first (the latest 200), `◆` for annotated ones and `◇` for lightweight ones, the one on HEAD highlighted. Each row shows how many commits the main branch made after the tag (`N since`: what no release holds yet), `off trunk` when the tag is on a commit the main branch does not have, `local` when the remote does not have it and `moved` when the remote has it on another commit. The remote is asked with `git ls-remote` when the view opens, with `↻`, and after a `git push` Claude runs, never on a timer; it never prompts for credentials. A click on a tag shows its message, its commit, who tagged it and when, the comparison with the main branch, and the command to push it when it is missing. The title shows how many tags there are and how many are not pushed.
 - **FILES**, in two views. **changed** (the main one): the files this session has changed, most recent first, with the lines it added and removed. That includes the files a shell command changes (`sed -i`, a redirect, a script): Bash does not say what it writes, so glassbox reads `git status` and the changed files before and after each command and compares them. It misses files git ignores, a change committed in the same command, and what a command left running in the background does later. Click one to preview it in place of the sections: the whole file as it is now, with the lines added since the session first wrote it in green and the lines removed in red, opened just above the first change; the wheel scrolls it, `tree` shows the file in the tree, `✕` goes back. When a line is wider than the pane a slider shows at the bottom: `◂` and `▸` move the text half a width, a click on the bar jumps there, the wheel over it scrolls sideways (the terminal does not pass the sideways wheel or trackpad swipe on to mods). `wrap` wraps long lines instead, and stays on from one file to the next. The preview follows the file as it changes. The `↗` at the end of each row opens the file in VS Code (its `code` command); without it, in the app your system picks: in WSL the Windows one, through `explorer.exe`; elsewhere `open`, `xdg-open` or `start`. **tree**: the session's folders like in filetree, with the colour and letter of the git status, `?:N M:N D:N` counts and lines added and removed. Files Claude reads light up purple, files it writes light up orange.
 - **CONTEXT**: every request to the model with its input and output and a bar of the context window, like turn-inspector. See [What goes into the context](#what-goes-into-the-context).
+- **SESSIONS**: the Claude Code sessions open on this machine, this one on top, each with its context and the state of its prompt cache. See [Open sessions and the prompt cache](#open-sessions-and-the-prompt-cache).
 
 Each section has its own coloured bar left of the title. Click a title to collapse that section and give its room to the others. The mouse wheel scrolls the section under the pointer.
 
@@ -69,6 +70,24 @@ Two options, in `/config` or in the settings under `pluginConfigs` → the plugi
 
 - `recordSessions` (default `true`): `false` records nothing;
 - `sessionsDir` (default empty, meaning `~/.claude/glassbox/sessions`): another folder, `~` allowed.
+
+## Open sessions and the prompt cache
+
+The prompt cache lasts an hour from a session's last request. After that, the next message writes the whole context into the cache again, and writing a token costs about twenty times reading it: coming back to a 600k session left idle since yesterday costs about as much as twenty messages at warm cache. With many sessions open, each one goes cold while you work on the others. SESSIONS shows which ones are still warm and which ones would reload from scratch:
+
+- `◐ working`: running a turn; its cache stays warm while it runs.
+- `◆ needs you`: stopped on a question or a permission, with its cache time.
+- `● 41m left`: warm, with the minutes left; yellow under ten.
+- `○ reload · idle 2d`: cold with 150k or more of context, in red: the next message reloads it all. `○ cold` is cold but light, cheap to reload.
+- `◌ compacted`: compacted after its last request, so its context is small.
+
+This session is on top, marked with a `▌` bar and **this** before its name, and stays there while the rest of the section scrolls. Then come the ones working, the ones waiting for you, the warm ones from the closest to expiry, and the cold ones from the heaviest. The title counts them: open, waiting for you, warm, to reload. `↻` reads them again.
+
+When the sessions run in [herdr](https://herdr.dev), each row shows the title of its terminal (what the session is working on) instead of the registry name, and a click on it brings herdr to that session's pane (`herdr agent focus <pane>`). `▸` at the end of the row opens the details below it: the registry name, the folder, the herdr pane, what coming back to it costs, and the `claude --resume` command. For this session, and for one outside herdr, the click on the name opens the details too.
+
+With the pane closed too, a toast says five minutes before a heavy (150k or more) idle cache expires, this session's or another's, once per expiry. Glassbox keeps nothing under the prompt: a countdown of this session's cache belongs in your own status line, which gets the transcript path on its input.
+
+The list comes from [`bin/sessions.py`](bin/sessions.py), which needs `python3`. Claude Code keeps a registry of its running sessions in `~/.claude/sessions/<pid>.json`; the script keeps the interactive ones whose process is still the registered one, and reads the tail of each transcript for the time and the context of the last request of the main thread (subagents excluded). If `herdr` is installed (`HERDR_BIN_PATH` or on the `PATH`), `herdr agent list` gives each session's pane and terminal title. Every session with Glassbox runs it once a minute: so that twenty sessions do not repeat the same work, the result is shared for 45 seconds in a private file in the temporary folder (`claude-glassbox-sessions-<uid>.json`). A session counts as warm until an hour after its last request; under usage overage the cache lasts five minutes, which the section does not know.
 
 ## Commands
 

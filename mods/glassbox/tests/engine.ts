@@ -157,6 +157,30 @@ const usage = (input: number, cached: number, output: number) => ({
 
 // Le variabili d'ambiente che il mod legge, e i comandi che lancia oltre a git.
 export const ENV: Record<string, string> = { HOME: '/home/u' }
+
+// Le sessioni come le dà bin/sessions.py: questa (s1) calda, una che lavora,
+// una calda a 8 minuti dalla scadenza con tanto contesto (gialla, ma ancora
+// senza avviso, che arriva a 5), una ferma da due giorni da ricaricare, una
+// fredda ma leggera. Tutte girano in herdr tranne book-old; il pane di
+// docs-soon herdr non lo trova più. Un test può cambiare `out` con sessionsOut.
+const MIN = 60_000
+export const sessionsOut = (now: number, soonMin = 52) =>
+  JSON.stringify({
+    at: now,
+    herdr: '/bin/herdr',
+    sessions: [
+      { id: 's1', name: 'r-main', cwd: '/r', status: 'idle', lastMs: now - 10 * MIN, ctx: 120_000, pane: 'w1:p1', title: 'Fixing the login' },
+      { id: 'busy1', name: 'docs-busy', cwd: '/d', status: 'busy', lastMs: now - MIN, ctx: 300_000, pane: 'w2:p1', title: 'Docs migration' },
+      { id: 'soon1', name: 'docs-soon', cwd: '/d', status: 'idle', lastMs: now - soonMin * MIN, ctx: 220_000, pane: 'w9:p9', title: 'Docs release' },
+      { id: 'cold1', name: 'book-old', cwd: '/b', status: 'idle', lastMs: now - 48 * 60 * MIN, ctx: 605_000 },
+      { id: 'cold2', name: 'tiny', cwd: '/t', status: 'idle', lastMs: now - 3 * 60 * MIN, ctx: 40_000, pane: 'w3:p2' },
+    ],
+  })
+export const SESSIONS = { out: sessionsOut(Date.now()) }
+// I pane su cui il mod ha chiesto a herdr di portarsi, dal primo.
+export const HERDR_FOCUS: string[] = []
+// Le righe che il mod ha messo nella status line, dalla più vecchia.
+export const STATUS_LINES: (string | undefined)[] = []
 export const RUNS: string[][] = []
 
 // Il contenuto dei file come lo legge $.fs.read, e le scritture in attesa che
@@ -243,7 +267,23 @@ export function fakeEngine(on: On, opened: string[] = []) {
     else ENV[e.name] = e.value
     return { value: {} }
   })
+  on('ui.status', (_, e) => {
+    STATUS_LINES.push(e.text)
+    return { value: undefined } as never
+  })
   on('process.run', (_, e) => {
+    // bin/sessions.py gira da solo ogni minuto: non è un comando del test.
+    if (e.argv[0] === 'python3' && String(e.argv[2] ?? '').endsWith('/bin/sessions.py')) return ok(SESSIONS.out)
+    // herdr: risponde in JSON, ed esce con 0 anche quando il pane non c'è.
+    if (e.argv[0] === '/bin/herdr' && e.argv[1] === 'agent' && e.argv[2] === 'focus') {
+      const pane = String(e.argv[3])
+      HERDR_FOCUS.push(pane)
+      return ok(
+        pane === 'w9:p9'
+          ? JSON.stringify({ error: { code: 'agent_not_found', message: `agent target ${pane} not found` } })
+          : JSON.stringify({ result: { agent: { pane_id: pane, focused: true } } }),
+      )
+    }
     if (e.argv[0] !== 'git') RUNS.push([...e.argv])
     if (MISSING.has(String(e.argv[0]))) throw new Error(`${e.argv[0]}: command not found`)
     if (e.argv[0] === 'wslpath') return ok(`\\\\wsl.localhost\\Ubuntu${String(e.argv[2]).replaceAll('/', '\\')}\n`)

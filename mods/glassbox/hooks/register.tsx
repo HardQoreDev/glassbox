@@ -1,8 +1,10 @@
-// Glassbox: una barra a destra divisa in quattro: HOOKS, gli hook della sessione da
+// Glassbox: una barra a destra divisa in cinque: HOOKS, gli hook della sessione da
 // spegnere e riaccendere; GIT, i branch attivi appesi al principale (o il
 // grafo dei commit come in VS Code); FILES, quelli modificati nella sessione
 // (o l'albero come in filetree); CONTEXT, i turni come in turn-inspector, con
-// quello che entra nel contesto a un clic e la tendina delle statistiche.
+// quello che entra nel contesto a un clic e la tendina delle statistiche;
+// SESSIONS, le sessioni aperte sulla macchina con la loro cache calda o da
+// ricaricare, e un avviso prima che scada una cache pesante.
 // Ogni sezione ha la sua barretta colorata, si chiude dal titolo e scorre con
 // la rotella sotto il puntatore; le altre si prendono lo spazio.
 import type { EngineInterface, Register, RenderElement, ToolCallInput } from 'claude-code'
@@ -18,6 +20,7 @@ import { hooks, loadHooks, toggleHook } from './settings-hooks'
 import { shellWrites, snapshot } from './shell-writes'
 import type { ShellWrite } from './shell-writes'
 import { configureRecord, recordInfo, setRecordVersion } from './record'
+import { EVERY_MS as SESSIONS_EVERY_MS, focusSession, label, refreshSessions, resetOwn, sessions, tick } from './sessions'
 import { statsOf, statsText } from './stats'
 import { record } from './touched'
 import { lastDone, registerTurns, seenNow, startTurns, toolDone, turns } from './turns-state'
@@ -31,6 +34,7 @@ import { fixedHooks, hookLines, hookView, hooksInfo } from './view-hooks'
 import { contextLayout, contextLines } from './view-context'
 import type { ContextLayout } from './view-context'
 import { previewLayout, previewLines } from './view-preview'
+import { SESSIONS_COLOR, sessionLines, sessionsInfo, sessionsPinned } from './view-sessions'
 import { tagLines, tagView, tagsInfo } from './view-tags'
 import { titleLines } from './view-title'
 import type { PreviewLayout } from './view-preview'
@@ -56,21 +60,22 @@ const FILES_COLOR = '#f0b429'
 // Sotto queste righe il titolo lascia il posto alle sezioni.
 const TITLE_MIN_ROWS = 20
 
-type SectionId = 'hooks' | 'graph' | 'files' | 'turns'
+type SectionId = 'hooks' | 'graph' | 'files' | 'turns' | 'sessions'
 // Ogni sezione ha il suo colore: la barretta, il titolo, la riga sotto, lo scorrimento.
 const SECTIONS: { id: SectionId; title: string; color: string }[] = [
   { id: 'hooks', title: 'HOOKS', color: '#4ade80' },
   { id: 'graph', title: 'GIT', color: '#59a4f9' },
   { id: 'files', title: 'FILES', color: FILES_COLOR },
   { id: 'turns', title: 'CONTEXT', color: INPUT_RAIL },
+  { id: 'sessions', title: 'SESSIONS', color: SESSIONS_COLOR },
 ]
 
 type Seg = { text: string; color?: string; dim?: boolean; bold?: boolean }
 type Tool = { key: string; label: string; dim?: boolean; active?: boolean; press: () => void }
 
 // Quali sezioni sono aperte, e da che riga parte ciascuna.
-const isOpen: Record<SectionId, boolean> = { hooks: true, graph: true, files: true, turns: true }
-const offset: Record<SectionId, number> = { hooks: 0, graph: 0, files: 0, turns: 0 }
+const isOpen: Record<SectionId, boolean> = { hooks: true, graph: true, files: true, turns: true, sessions: true }
+const offset: Record<SectionId, number> = { hooks: 0, graph: 0, files: 0, turns: 0, sessions: 0 }
 // Le righe del corpo che ogni sezione occupava all'ultimo disegno: la rotella
 // scorre quella sotto il puntatore.
 let spans: { id: SectionId; from: number; to: number; max: number }[] = []
@@ -154,6 +159,13 @@ const share = (room: number, n: number): number[] =>
 
 const clamp = (v: number, max: number) => Math.max(0, Math.min(max, v))
 
+// Le sessioni si rileggono, poi gli avvisi e il pannello.
+async function refreshSessionsView($: EngineInterface, fresh = false): Promise<void> {
+  await refreshSessions($, fresh)
+  tick($)
+  redraw($)
+}
+
 export const register: Register = (on, options) => {
   configureRecord(options)
   registerTurns(on)
@@ -169,7 +181,7 @@ export const register: Register = (on, options) => {
     await $.command
       .register({
         name: COMMAND,
-        description: 'Opens Glassbox on the right: hooks, git, files and what goes into the context (close)',
+        description: 'Opens Glassbox on the right: hooks, git, files, what goes into the context and the open sessions (close)',
         argumentHint: '[close]',
       })
       .catch(err => $.ui.log(`glassbox: /${COMMAND} not registered: ${err}`))
@@ -178,6 +190,15 @@ export const register: Register = (on, options) => {
     void $.ui.open({ id: PANE, title: TITLE, columns: COLUMNS, backgroundColor: 'transparent' }).catch(() => undefined)
     void refreshAll($)
     $.clock.every(EVERY_MS, () => void refreshAll($))
+    // Le sessioni ogni minuto, anche a pannello chiuso: gli avvisi sulle cache
+    // in scadenza non devono aspettare che lo si apra.
+    // Dopo un /clear questa è un'altra sessione: le sue richieste ripartono da zero.
+    resetOwn()
+    // La riga sotto il prompt che una versione precedente teneva: il countdown
+    // della cache ora sta nella status line dell'utente, fuori da Glassbox.
+    $.ui.status(undefined)
+    void refreshSessionsView($)
+    $.clock.every(SESSIONS_EVERY_MS, () => void refreshSessionsView($))
 
     return started
   })
@@ -416,12 +437,27 @@ export const register: Register = (on, options) => {
             redraw($)
           },
         }),
+      sessions: () =>
+        sessionLines(
+          inner,
+          now,
+          id => {
+            sessions.selected = sessions.selected === id ? '' : id
+            redraw($)
+          },
+          // herdr si sposta sul pane della sessione; qui resta solo un errore, se c'è.
+          s =>
+            void focusSession($, s).then(err => {
+              if (err) $.ui.toast(`${label(s)}: not opened in herdr: ${err}`)
+            }),
+        ),
     }
     const info: Record<SectionId, () => Seg[]> = {
       hooks: hooksInfo,
       graph: () => (graphView === 'tags' ? tagsInfo() : graphInfo()),
       files: () => (filesView === 'tree' ? filesInfo() : touchedInfo()),
       turns: turnsInfo,
+      sessions: () => sessionsInfo(now),
     }
     const tools: Record<SectionId, Tool[]> = {
       hooks:
@@ -497,6 +533,7 @@ export const register: Register = (on, options) => {
           },
         },
       ],
+      sessions: [{ key: 'sessions-refresh', label: '↻', dim: true, press: () => void refreshSessionsView($, true) }],
     }
 
     // Il titolo: la barretta colorata, il nome, le informazioni, gli strumenti a
@@ -596,12 +633,14 @@ export const register: Register = (on, options) => {
       }
       offset[s.id] = clamp(offset[s.id], max)
       const from = offset[s.id]
+      // Le prime righe che restano ferme mentre il resto scorre: in SESSIONS, questa sessione.
+      const pin = s.id === 'sessions' ? Math.min(sessionsPinned(), rows) : 0
       nextSpans.push({ id: s.id, from: row, to: row + rows, max })
 
       const thumb = Math.max(1, Math.round((rows * rows) / Math.max(1, own.length)))
       const thumbAt = max === 0 ? 0 : Math.round((from / max) * (rows - thumb))
       for (let i = 0; i < rows; i++) {
-        const line = own[from + i]
+        const line = i < pin ? own[i] : own[from + i]
         const isThumb = i >= thumbAt && i < thumbAt + thumb
         out.push(
           <Box key={`${s.id}:${i}`} flexDirection="row" height={1} overflow="hidden">
