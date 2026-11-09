@@ -1,8 +1,10 @@
 // Glassbox: una barra a destra divisa in cinque: HOOKS, gli hook della sessione da
 // spegnere e riaccendere; GIT, i branch attivi appesi al principale (o il
 // grafo dei commit come in VS Code); FILES, quelli modificati nella sessione
-// (o l'albero come in filetree); CONTEXT, i turni come in turn-inspector, con
-// quello che entra nel contesto a un clic e la tendina delle statistiche;
+// (o l'albero come in filetree, o GUARD: quelli che sta cambiando anche
+// un'altra sessione aperta, e allora la parola guard si accende); CONTEXT, i
+// turni come in turn-inspector, con quello che entra nel contesto a un clic e
+// la tendina delle statistiche;
 // SESSIONS, le sessioni aperte sulla macchina con la loro cache calda o da
 // ricaricare, e un avviso prima che scada una cache pesante.
 // Ogni sezione ha la sua barretta colorata, si chiude dal titolo e scorre con
@@ -21,6 +23,8 @@ import { shellWrites, snapshot } from './shell-writes'
 import type { ShellWrite } from './shell-writes'
 import { configureRecord, recordInfo, setRecordVersion } from './record'
 import { EVERY_MS as SESSIONS_EVERY_MS, focusSession, label, refreshSessions, resetOwn, sessions, tick } from './sessions'
+import type { Session } from './sessions'
+import { contestedPaths, refreshGuard } from './guard'
 import { statsOf, statsText } from './stats'
 import { record } from './touched'
 import { lastDone, registerTurns, seenNow, startTurns, toolDone, turns } from './turns-state'
@@ -28,6 +32,7 @@ import { fit, len, redraw } from './ui'
 import type { Els, Line } from './ui'
 import { join } from './vendor/filetree'
 import { fileLines, filesInfo, touchedInfo, touchedLines } from './view-files'
+import { GUARD_COLOR, contestedCount, guardInfo, guardLines } from './view-guard'
 import { branchLines, branchView } from './view-branches'
 import { graph, graphInfo, graphLines } from './view-graph'
 import { fixedHooks, hookLines, hookView, hooksInfo } from './view-hooks'
@@ -71,7 +76,8 @@ const SECTIONS: { id: SectionId; title: string; color: string }[] = [
 ]
 
 type Seg = { text: string; color?: string; dim?: boolean; bold?: boolean }
-type Tool = { key: string; label: string; dim?: boolean; active?: boolean; press: () => void }
+// `color` accende lo strumento anche quando non è scelto: la guardia che ha trovato qualcosa.
+type Tool = { key: string; label: string; dim?: boolean; active?: boolean; color?: string; press: () => void }
 
 // Quali sezioni sono aperte, e da che riga parte ciascuna.
 const isOpen: Record<SectionId, boolean> = { hooks: true, graph: true, files: true, turns: true, sessions: true }
@@ -79,8 +85,10 @@ const offset: Record<SectionId, number> = { hooks: 0, graph: 0, files: 0, turns:
 // Le righe del corpo che ogni sezione occupava all'ultimo disegno: la rotella
 // scorre quella sotto il puntatore.
 let spans: { id: SectionId; from: number; to: number; max: number }[] = []
-// La vista della sezione FILE: i file modificati nella sessione, o l'albero.
-let filesView: 'touched' | 'tree' = 'touched'
+// La vista della sezione FILE: i file modificati nella sessione, l'albero, o
+// quelli che sta cambiando anche un'altra sessione.
+type FilesView = 'touched' | 'tree' | 'guard'
+let filesView: FilesView = 'touched'
 // La vista di GIT: i branch attivi appesi al principale, ogni commit, o i tag.
 let graphView: 'active' | 'full' | 'tags' = 'active'
 // Come era disposta l'anteprima di un file all'ultimo disegno: fin dove
@@ -131,6 +139,8 @@ async function showActivity($: EngineInterface, e: ToolCallInput, isOk: boolean,
     }
     // L'anteprima aperta su un file scritto si aggiorna subito, senza aspettare git.
     if (written.includes(preview.path) && (await refreshPreview($))) redraw($)
+    // Una scrittura di questa sessione può aver toccato un file di un'altra.
+    if (written.length > 0) void refreshGuardView($)
     let isLit = false
     for (const [p, t] of lit) isLit = (await touch($, p, t)) || isLit
     if (isLit) {
@@ -159,12 +169,31 @@ const share = (room: number, n: number): number[] =>
 
 const clamp = (v: number, max: number) => Math.max(0, Math.min(max, v))
 
-// Le sessioni si rileggono, poi gli avvisi e il pannello.
+// Le sessioni si rileggono, poi gli avvisi, la guardia e il pannello.
 async function refreshSessionsView($: EngineInterface, fresh = false): Promise<void> {
   await refreshSessions($, fresh)
   tick($)
   redraw($)
+  await refreshGuardView($)
 }
+
+// La guardia guarda i file scritti da questa sessione e dalle altre; un file
+// conteso da poco arriva anche come avviso, una volta sola.
+async function refreshGuardView($: EngineInterface): Promise<void> {
+  try {
+    const { text, isChanged } = await refreshGuard($)
+    if (text) $.ui.toast(text)
+    if (isChanged) redraw($)
+  } catch (err) {
+    $.ui.log(`glassbox: guard not refreshed: ${err}`)
+  }
+}
+
+// herdr si sposta sul pane della sessione; qui resta solo un errore, se c'è.
+const jumpTo = ($: EngineInterface, s: Session) =>
+  void focusSession($, s).then(err => {
+    if (err) $.ui.toast(`${label(s)}: not opened in herdr: ${err}`)
+  })
 
 export const register: Register = (on, options) => {
   configureRecord(options)
@@ -279,7 +308,7 @@ export const register: Register = (on, options) => {
         redraw($)
       }
     }
-    const showView = (view: 'touched' | 'tree') => {
+    const showView = (view: FilesView) => {
       if (filesView !== view) offset.files = 0
       filesView = view
       redraw($)
@@ -412,15 +441,23 @@ export const register: Register = (on, options) => {
       files: () =>
         filesView === 'tree'
           ? fileLines(inner, now, fileRows, pressFile)
-          : touchedLines(
-              inner,
-              now,
-              t => void openPreview($, t.path).then(() => redraw($)),
-              t =>
-                void openFile($, t.path).catch(err => {
-                  $.ui.toast(`Could not open ${t.path.split('/').pop()}: ${err instanceof Error ? err.message : err}`)
-                }),
-            ),
+          : filesView === 'guard'
+            ? guardLines(
+                inner,
+                now,
+                path => void openPreview($, path).then(() => redraw($)),
+                s => jumpTo($, s),
+              )
+            : touchedLines(
+                inner,
+                now,
+                t => void openPreview($, t.path).then(() => redraw($)),
+                t =>
+                  void openFile($, t.path).catch(err => {
+                    $.ui.toast(`Could not open ${t.path.split('/').pop()}: ${err instanceof Error ? err.message : err}`)
+                  }),
+                contestedPaths(),
+              ),
       turns: () =>
         turnLines(inner, {
           toggle: n => {
@@ -445,20 +482,17 @@ export const register: Register = (on, options) => {
             sessions.selected = sessions.selected === id ? '' : id
             redraw($)
           },
-          // herdr si sposta sul pane della sessione; qui resta solo un errore, se c'è.
-          s =>
-            void focusSession($, s).then(err => {
-              if (err) $.ui.toast(`${label(s)}: not opened in herdr: ${err}`)
-            }),
+          s => jumpTo($, s),
         ),
     }
     const info: Record<SectionId, () => Seg[]> = {
       hooks: hooksInfo,
       graph: () => (graphView === 'tags' ? tagsInfo() : graphInfo()),
-      files: () => (filesView === 'tree' ? filesInfo() : touchedInfo()),
+      files: () => (filesView === 'tree' ? filesInfo() : filesView === 'guard' ? guardInfo() : touchedInfo()),
       turns: turnsInfo,
       sessions: () => sessionsInfo(now),
     }
+    const sharedFiles = contestedCount()
     const tools: Record<SectionId, Tool[]> = {
       hooks:
         fixedHooks().length > 0
@@ -484,6 +518,14 @@ export const register: Register = (on, options) => {
       files: [
         { key: 'files-view-touched', label: 'changed', active: filesView === 'touched', press: () => showView('touched') },
         { key: 'files-view-tree', label: 'tree', active: filesView === 'tree', press: () => showView('tree') },
+        // La guardia: rossa quando un file di questa sessione lo sta cambiando anche un'altra.
+        {
+          key: 'files-view-guard',
+          label: sharedFiles > 0 ? `guard ${sharedFiles}` : 'guard',
+          active: filesView === 'guard',
+          ...(sharedFiles > 0 ? { color: GUARD_COLOR } : {}),
+          press: () => showView('guard'),
+        },
         ...(filesView === 'tree'
           ? [
               {
@@ -498,7 +540,7 @@ export const register: Register = (on, options) => {
               },
             ]
           : []),
-        { key: 'files-refresh', label: '↻', dim: true, press: () => void refreshAll($) },
+        { key: 'files-refresh', label: '↻', dim: true, press: () => void (filesView === 'guard' ? refreshSessionsView($, true) : refreshAll($)) },
       ],
       turns: [
         { key: 'turns-analyze', label: 'analyze', active: analysis.state === 'running', press: analyze },
@@ -585,7 +627,7 @@ export const register: Register = (on, options) => {
               <Button key={t.key} plain dimColor={t.dim} label={t.label} onPress={t.press} />
             ) : (
               <Button key={t.key} plain label={t.label} onPress={t.press}>
-                <Text color={t.active ? color : undefined} dimColor={!t.active} bold={t.active} underline={t.active}>
+                <Text color={t.color ?? (t.active ? color : undefined)} dimColor={!t.active && !t.color} bold={t.active || t.color !== undefined} underline={t.active}>
                   {t.label}
                 </Text>
               </Button>

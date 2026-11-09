@@ -11,6 +11,7 @@ import type { Touched } from './touched'
 import { SELECTED_BG, fit, len } from './ui'
 import type { Line } from './ui'
 import { ACCENT, ADD_COLOR, DEL_COLOR, GIT_COLOR, TONES, URGENT, dirname, underAny } from './vendor/filetree'
+import { GUARD_COLOR } from './view-guard'
 
 type Seg = { text: string; color?: string; dim?: boolean; bold?: boolean; strike?: boolean }
 
@@ -52,13 +53,21 @@ export const touchedInfo = (): Seg[] => {
 
 /**
  * La vista principale: un file per riga, dal più recente; la cartella in
- * grigio, il nome in chiaro, a destra le righe inserite e cancellate.
+ * grigio, il nome in chiaro, a destra le righe inserite e cancellate. Un file
+ * che anche un'altra sessione aperta sta cambiando (`contested`, da GUARD) ha
+ * ▲ e il nome in rosso.
  */
 // Il pulsante in fondo a ogni file modificato, che lo apre fuori; lo spazio
 // davanti sta fuori dal pulsante, che il motore inverte per intero.
 const OPEN = '↗'
 
-export function touchedLines(width: number, now: number, press: (t: Touched) => void, open: (t: Touched) => void): Line[] {
+export function touchedLines(
+  width: number,
+  now: number,
+  press: (t: Touched) => void,
+  open: (t: Touched) => void,
+  contested: ReadonlySet<string> = new Set(),
+): Line[] {
   const list = touchedList()
   if (list.length === 0) return [el => <el.Text dimColor>{fit('No files changed in this session yet.', width)}</el.Text>]
 
@@ -74,12 +83,15 @@ export function touchedLines(width: number, now: number, press: (t: Touched) => 
     const dir = cut < 0 || dirRoom < 3 ? '' : len(rel.slice(0, cut + 1)) <= dirRoom ? rel.slice(0, cut + 1) : `…${rel.slice(0, cut + 1).slice(-(dirRoom - 1))}`
     const pad = ' '.repeat(Math.max(0, width - 2 - len(dir) - len(shownName) - len(plus) - len(minus) - 1 - len(OPEN)))
     const flash = tree.flash.get(t.path)
-    const lit = flash !== undefined && flash.until > now ? TONES[flash.tone] : undefined
-    const mark = t.isNew ? '+ ' : '● '
+    const isShared = contested.has(t.path)
+    const lit = flash !== undefined && flash.until > now ? TONES[flash.tone] : isShared ? GUARD_COLOR : undefined
+    const mark = isShared ? '▲ ' : t.isNew ? '+ ' : '● '
 
     return el => (
       <el.Box key={`t:${t.path}`} flexDirection="row" height={1} overflow="hidden">
-        <el.Text color={t.isNew ? ADD_COLOR : GIT_COLOR.M}>{mark}</el.Text>
+        <el.Text color={isShared ? GUARD_COLOR : t.isNew ? ADD_COLOR : GIT_COLOR.M} bold={isShared}>
+          {mark}
+        </el.Text>
         <el.Button key={`touched:${t.path}`} plain label={rel} onPress={() => press(t)}>
           <el.Text dimColor>{dir}</el.Text>
           <el.Text color={lit} bold={lit !== undefined}>

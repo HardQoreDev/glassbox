@@ -34,6 +34,8 @@ export type Session = {
   // In herdr: il pane dove gira, e il titolo del suo terminale.
   pane?: string
   title?: string
+  // I file che ha scritto con Edit e Write, con l'ora dell'ultima volta: per GUARD.
+  writes?: ReadonlyMap<string, number>
 }
 
 export type Cache =
@@ -92,9 +94,22 @@ export function readSessions(stdout: string): { list: Session[]; error: string; 
       isCompacted: r.compacted === true,
       ...(typeof r.pane === 'string' && PANE_RE.test(r.pane) ? { pane: r.pane } : {}),
       ...(typeof r.title === 'string' && r.title ? { title: r.title } : {}),
+      ...writesOf(r.writes),
     })
   }
   return { list, error: typeof o.error === 'string' ? o.error : '', herdr: typeof o.herdr === 'string' ? o.herdr : '' }
+}
+
+// I file scritti, come li dà lo script: [[percorso assoluto, ms], ...].
+function writesOf(raw: unknown): { writes?: ReadonlyMap<string, number> } {
+  if (!Array.isArray(raw)) return {}
+  const out = new Map<string, number>()
+  for (const w of raw) {
+    if (!Array.isArray(w)) continue
+    const [path, at] = w as unknown[]
+    if (typeof path === 'string' && path.startsWith('/') && typeof at === 'number' && Number.isFinite(at)) out.set(path, Math.max(at, out.get(path) ?? 0))
+  }
+  return out.size > 0 ? { writes: out } : {}
 }
 
 // Un pane di herdr come `w3:p8`: solo questo arriva al comando.

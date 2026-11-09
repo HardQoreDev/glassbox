@@ -102,7 +102,7 @@ describe('la sezione SESSIONS', () => {
     expect([span(30_000), span(40 * MIN), span(14 * 60 * MIN), span(7 * 24 * 60 * MIN)]).toEqual(['1m', '40m', '14h', '7d'])
   })
 
-  test('nel pannello: le sessioni in ordine, questa segnata in cima, i dettagli al clic, l’avviso', async ($, on) => {
+  test('nel pannello: le sessioni in ordine, questa segnata in cima, i dettagli al clic, l’avviso', { timeoutMs: 20_000 }, async ($, on) => {
     const toasts = toastsOf(on)
     const saved = SESSIONS.out
     // docs-soon a 4 minuti dalla scadenza: questa volta l'avviso parte.

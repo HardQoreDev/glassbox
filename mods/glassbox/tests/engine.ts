@@ -182,6 +182,9 @@ export const HERDR_FOCUS: string[] = []
 // Le righe che il mod ha messo nella status line, dalla più vecchia.
 export const STATUS_LINES: (string | undefined)[] = []
 export const RUNS: string[][] = []
+// Per GUARD: l'ora (in secondi) dell'ultimo commit di ogni file, per nome, e
+// le cartelle fuori da git.
+export const GUARD = { commits: {} as Record<string, string>, outside: new Set<string>() }
 
 // Il contenuto dei file come lo legge $.fs.read, e le scritture in attesa che
 // uno strumento applica quando gira.
@@ -298,6 +301,9 @@ export function fakeEngine(on: On, opened: string[] = []) {
     if (args.includes(' reflog ')) return ok(REFLOG[String(e.argv.at(-2))] ?? '')
     if (args.includes('--git-common-dir')) return ok('/r/.git\n')
     if (args.includes('rev-parse')) return ok('/r\n')
+    if (e.argv.includes('--literal-pathspecs') && GUARD.outside.has(String(e.argv[e.argv.indexOf('-C') + 1])))
+      return { value: { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (args.includes('--format=%ct')) return ok(GUARD.commits[String(e.argv.at(-1))] ?? '')
     if (args.includes(' remote')) return ok('origin\tgit@example.com:me/r.git (fetch)\norigin\tgit@example.com:me/r.git (push)\n')
     if (args.includes(' log ')) return ok(LOG)
     if (args.includes(' status ')) return ok(GIT.status)
