@@ -60,6 +60,8 @@ export function contextLayout(width: number, bodyRows: number): ContextLayout {
 
 export type ContextActions = {
   back: () => void
+  /** Chiede di nuovo quello che la finestra mostra: c'è solo per l'analisi. */
+  rerun?: () => void
   open: () => void
   slide: (left: number) => void
   toggleWrap: () => void
@@ -102,6 +104,7 @@ export function contextLines(el: Els, width: number, layout: ContextLayout, colo
       title: room => [{ text: fit(doc.title, room), bold: true }],
       right: doc.info ? [{ text: doc.info, dim: true }] : [],
       tools: [
+        ...(act.rerun ? [{ key: 'context-rerun', label: '↻', press: act.rerun }] : []),
         { key: 'context-wrap', label: 'wrap', active: doc.wrap, press: act.toggleWrap },
         { key: 'context-open', label: '↗', press: act.open },
         { key: 'context-close', label: '✕', press: act.back },

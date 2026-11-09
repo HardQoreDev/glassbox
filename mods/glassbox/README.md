@@ -48,9 +48,31 @@ The numbers per kind and per block come from the characters of the messages, sca
 - less than 60% of the input from the cache, or the cache broken twice or more; a prompt that took more than 25 requests; subagent reports above 20k;
 - a tool whose results weigh 10k at once (with how to narrow them); more than 20% of the tool calls failed.
 
+### analyze
+
+The `analyze` button next to `stats` asks Claude to read its own context as the last request sent it, with the numbers of the dropdown, and to judge it as a context engineer, in five parts: what the context holds, the dead weight item by item, what to do now (`/compact` with the instructions already written, `/clear` and a fresh start, a rule to move into CLAUDE.md or memory, an MCP server or a skill to switch off, exploration to hand to a subagent), habits to change, and a brief of at most 12 lines to restart from in a new session. The answer opens in the context window; `↻` asks again, `↗` opens the saved file. Pressing `analyze` again on the same request shows the same answer.
+
+It runs through `$.model.fork`: the main thread's last request again, its model, system prompt, tools and messages, with the question after it and every tool denied. While the prompt cache is warm the context is billed as a cache read; once it has lapsed it is paid in full. The cost is shown next to the title (`1.2k out · 140k cached`, plus `uncached` when it counts).
+
+## Session records
+
+Claude Code keeps each session's transcript in `~/.claude/projects/<project>/<id>.jsonl`, but deletes it after 30 days (`cleanupPeriodDays`) and does not keep what each request actually sent. Glassbox writes every request of the main thread to `~/.claude/glassbox/sessions/<project>/<session id>/`, the project folder named as Claude Code names its own (`/home/me/app` → `-home-me-app`):
+
+- `session.json`: the summary, rewritten at every request: the first prompt, the models, the requests, the tokens (uncached input, cache read and written, output), the last and the largest context, the compactions, `/context` after the last turn, the tool calls, the subagents, the analyses, and the `claude --resume` command that returns to it;
+- `requests/0001.json`, one per request: the usage, the stop reason, the reply as it streamed, and the messages. Each request says how many messages it carries unchanged from the one before (`keep`) and holds only the rest, so the context of request k is request k−1's cut to `keep` plus its `messages` (`replay` in [`hooks/record.ts`](hooks/record.ts) rebuilds them). After a compaction `keep` is 0;
+- `system/01.json`: the system prompt and the tools as the engine composed them (no input schemas, which a mod cannot read); a new file only when they change;
+- `analyses/*.md`: the analyses asked for with `analyze`.
+
+A resumed session goes on in the same folder; after `/clear` the next session gets its own. The **flow** view of `stats` shows how many requests are recorded and their size on disk. A record holds everything that went through the context, files read included: treat it as you treat the transcripts.
+
+Two options, in `/config` or in the settings under `pluginConfigs` → the plugin → `options`:
+
+- `recordSessions` (default `true`): `false` records nothing;
+- `sessionsDir` (default empty, meaning `~/.claude/glassbox/sessions`): another folder, `~` allowed.
+
 ## Commands
 
-- `/glassbox` opens the pane.
+- `/glassbox` opens the pane, and says where the session is recorded.
 - `/glassbox close` closes it.
 
 In the terminal Glassbox docks on the right in the fullscreen layout (`/tui fullscreen`) with at least 110 columns; otherwise it shows above the prompt.

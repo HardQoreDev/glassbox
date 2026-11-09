@@ -1,9 +1,23 @@
 {
   "name": "glassbox",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Claude Code as a glass box: a pane on the right with the session's hooks to switch off, the active git branches, the files changed in the session, and what goes into the context of every request, with stats and tips to keep it lean",
   "author": {
     "name": "HardQoreDev"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "userConfig": {
+    "recordSessions": {
+      "type": "boolean",
+      "title": "Record sessions",
+      "description": "Keep every request of the session on disk with the context it carried, the system prompt and the tools, under the sessions folder",
+      "default": true
+    },
+    "sessionsDir": {
+      "type": "string",
+      "title": "Sessions folder",
+      "description": "Where the session records go; empty: ~/.claude/glassbox/sessions",
+      "default": ""
+    }
+  }
 }

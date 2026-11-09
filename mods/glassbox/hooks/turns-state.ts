@@ -4,10 +4,12 @@
 // ogni evento passa avanti com'è.
 import type { EngineInterface, On, SessionContextBreakdown, ToolCallInput, ToolCallResult } from 'claude-code'
 
-import { pruneContext, recordChunk, recordSent, registerContext, resetContext } from './context'
+import { outputOf, pruneContext, recordChunk, recordSent, registerContext, resetContext, sentMessages, toolsSeen } from './context'
+import type { ApiMessage } from './context'
+import { endRecord, recordRequest, recordTurn } from './record'
 import { chunk, createLedger, promptStarted, stepEnded, stepStarted, systemTokens, toolAnswered } from './vendor/turns'
 import type { Ledger, Turn } from './vendor/turns'
-import type { AgentUse, Tab } from './stats'
+import type { AgentUse, Seen, Tab } from './stats'
 import { redraw } from './ui'
 
 const KEEP = 200
@@ -38,6 +40,16 @@ const safeJson = (v: unknown): string => {
   } catch {
     return ''
   }
+}
+
+/** L'ultima richiesta con la risposta arrivata. */
+export const lastDone = (): Turn | undefined => [...turns.ledger.turns].reverse().find(t => t.input !== undefined)
+
+/** Quello che la tendina sa oltre al registro: i messaggi dell'ultima richiesta vista partire, i subagent, gli skill. */
+export function seenNow(): Seen {
+  const last = lastDone()
+  const messages = last ? sentMessages(last.n) : undefined
+  return { ...(last && messages ? { sent: { n: last.n, messages } } : {}), agents: turns.agents, skills: turns.skills }
 }
 
 /** All'avvio della sessione: un registro vuoto e la finestra di contesto. */
@@ -99,9 +111,13 @@ export const registerTurns = (on: On): void => {
     pruneContext(turns.ledger.turns[0]?.n ?? turn.n)
     // I messaggi che la richiesta porta, letti mentre parte: la lettura non la
     // ritarda, e quelli in più (la risposta, se arriva prima) restano fuori.
-    void $.session
+    const sent: Promise<readonly ApiMessage[] | undefined> = $.session
       .messages({ as: 'api' })
-      .then(m => recordSent(turn.n, e.messageCount > 0 && m.length > e.messageCount ? m.slice(0, e.messageCount) : m))
+      .then(m => {
+        const list = e.messageCount > 0 && m.length > e.messageCount ? m.slice(0, e.messageCount) : m
+        recordSent(turn.n, list)
+        return list
+      })
       .catch(() => undefined)
     redraw($)
     const names = new Map<number, string>()
@@ -122,6 +138,25 @@ export const registerTurns = (on: On): void => {
     stepEnded(turns.ledger, turn, r.usage, r.stopReason)
     if (turns.live === turn) turns.live = undefined
     redraw($)
+    // Su disco, fuori dal giro: la richiesta con il contesto che ha portato.
+    void recordRequest(
+      $,
+      {
+        n: turn.n,
+        turnId: turn.turnId,
+        step: turn.step,
+        prompt: turn.prompt,
+        model: e.model,
+        effort: e.effort,
+        stopReason: r.stopReason,
+        usage: r.usage,
+        isCompacted: turn.isCompacted,
+        window: turns.ledger.window,
+        messages: sent,
+        output: outputOf(turn.n),
+      },
+      toolsSeen(),
+    )
     return r
   })
 
@@ -133,8 +168,15 @@ export const registerTurns = (on: On): void => {
       if (system !== undefined) turns.ledger.system = system
       if (usage?.context.breakdown) turns.breakdown = usage.context.breakdown
       redraw($)
+      void recordTurn($, { breakdown: usage?.context.breakdown, calls: turns.calls, agents: turns.agents })
     }
     return r
+  })
+
+  // La fine della sessione, o un /clear, chiude il suo registro.
+  on('session.end', async ($, e, next) => {
+    await endRecord($, e.sessionId, e.reason).catch(() => undefined)
+    return next(e)
   })
 
   on('session.measure', async ($, e, next) => {

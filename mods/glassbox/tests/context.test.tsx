@@ -174,7 +174,7 @@ describe('quello che entra nel contesto', () => {
     await has('health', 'fill', 'waste', 'flow', 'tools', /^in use/, /^preloaded/, /^reclaimable/, /^cache/, 'tips')
     await has(/^The MCP server docs puts 9\.0k of tool schemas in every/)
     await tab('stats-tab:flow')
-    await has(/^requests {4}$/, '2 in 1 prompt · up to 2 in one', /^input {7}$/)
+    await has(/^requests {4}$/, '2 in 1 prompt · up to 2 in one', /^input {7}$/, /^recorded {4}$/, /^\d+ requests · \d+ KB on disk$/)
     await tab('stats-tab:tools')
     await has(/^tool calls/, 'most used · calls · results in context', /^Read/)
     await tab('stats-tab:waste')

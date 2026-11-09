@@ -13,6 +13,8 @@ export type ApiBlock = { type: string; [field: string]: unknown }
 export type ApiMessage = { role: 'user' | 'assistant'; content: readonly ApiBlock[] }
 
 export type Part = 'system' | 'earlier' | 'new' | 'output'
+/** Quello che la finestra mostra: un pezzo di una richiesta, o l'analisi del contesto. */
+export type DocPart = Part | 'analysis'
 
 // Com'è disegnata una riga: i titoli dei messaggi per chi li ha scritti, le
 // intestazioni dei blocchi, le note del mod; senza, il testo com'è stato mandato.
@@ -44,7 +46,7 @@ const store = {
 export const doc = {
   isOpen: false,
   n: 0,
-  part: 'system' as Part,
+  part: 'system' as DocPart,
   title: '',
   info: '',
   lines: [] as DocLine[],
@@ -97,6 +99,12 @@ export function sentMessages(n: number): readonly ApiMessage[] | undefined {
   s.messages ??= s.epoch.messages.slice(0, s.count)
   return s.messages
 }
+
+/** La risposta del turno `n` com'è arrivata, blocco per blocco. */
+export const outputOf = (n: number): readonly OutBlock[] | undefined => store.output.get(n)
+
+/** Gli strumenti come il motore li ha descritti al modello, e quali aspettano dietro ToolSearch. */
+export const toolsSeen = (): ReadonlyMap<string, ToolSeen> => store.tools
 
 /** Un pezzo della risposta del turno `n`, nel suo blocco. */
 export function recordChunk(n: number, c: TurnStepChunk): void {

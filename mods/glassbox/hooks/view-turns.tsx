@@ -7,9 +7,10 @@
 import type { Kind } from './anatomy'
 import { partAt, partOf, sentMessages } from './context'
 import type { Focus, Part } from './context'
+import { recordInfo } from './record'
 import { TABS, statsOf } from './stats'
-import type { Heavy, Level, Seen, Share, Slice, Stat, Tab, Tip } from './stats'
-import { turns } from './turns-state'
+import type { Heavy, Level, Share, Slice, Stat, Tab, Tip } from './stats'
+import { seenNow, turns } from './turns-state'
 import { cell, fit, len, wrapText } from './ui'
 import type { Line } from './ui'
 import { barCells, contextAfter, fmtTokens, gist, inputStack } from './vendor/turns'
@@ -65,12 +66,7 @@ export const turnsInfo = (): { text: string; color?: string; dim?: boolean }[] =
   ]
 }
 
-/** Quello che la tendina sa oltre al registro: i messaggi dell'ultima richiesta vista partire, i subagent, gli skill. */
-function seenNow(): Seen {
-  const lastDone = [...turns.ledger.turns].reverse().find(t => t.input !== undefined)
-  const messages = lastDone ? sentMessages(lastDone.n) : undefined
-  return { ...(lastDone && messages ? { sent: { n: lastDone.n, messages } } : {}), agents: turns.agents, skills: turns.skills }
-}
+const bytesText = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
 
 export type StatsActions = {
   /** Mostra un'altra vista della tendina. */
@@ -82,6 +78,9 @@ export type StatsActions = {
 /** La tendina: le viste in cima, poi i numeri, le barre e i consigli della vista scelta. */
 export function statsLines(width: number, act: StatsActions): Line[] {
   const s = statsOf(turns.ledger, turns.calls, turns.breakdown, seenNow())
+  // Il registro su disco, in fondo al giro delle richieste.
+  const recorded = recordInfo()
+  if (recorded) s.rows.flow.push({ label: 'recorded', value: `${recorded.requests} request${recorded.requests === 1 ? '' : 's'} · ${bytesText(recorded.bytes)} on disk` })
   const tab = turns.statsTab
   const lines: Line[] = []
   const title = (text: string): Line => el => (

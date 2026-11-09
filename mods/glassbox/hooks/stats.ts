@@ -354,3 +354,44 @@ export function statsOf(l: Ledger, calls: Calls, breakdown?: SessionContextBreak
     return { rows, ...(fill ? { fill } : {}), categories, tools: tools.slice(0, TOP_TOOLS), tips }
   }
 }
+
+const KIND_NAME: Record<Slice['kind'], string> = {
+  preloaded: 'preloaded (system prompt, tools, memory)',
+  results: 'tool results',
+  calls: 'tool calls',
+  replies: 'replies',
+  thinking: 'thinking',
+  prompts: 'prompts',
+  reminders: 'reminders and hook output',
+}
+
+/** Le statistiche in testo semplice, vista per vista: i numeri che l'analisi dà al modello. */
+export function statsText(s: Stats): string {
+  const out: string[] = []
+  const rows = (list: readonly Stat[]) => list.forEach(r => out.push(`- ${r.label}: ${r.value}${r.level === 'warn' ? ' (warning)' : ''}`))
+  for (const tab of TABS) {
+    const list = s.rows[tab]
+    const isFill = tab === 'fill' && s.fill
+    if (list.length === 0 && !isFill && !(tab === 'tools' && s.tools.length)) continue
+    out.push('', `## ${tab}`)
+    if (tab === 'fill' && s.fill) {
+      const f = s.fill
+      out.push(`What request #${f.n} carried, ${f.isScaled ? 'from characters scaled to the measured input' : 'estimated from characters'}:`)
+      for (const x of f.slices) out.push(`- ${KIND_NAME[x.kind]}: ~${k(x.tokens)} · ${pct(x.tokens, f.total)}`)
+      out.push('Heaviest blocks:')
+      for (const x of f.heaviest) out.push(`- ${x.label} (${x.kind}): ~${k(x.tokens)}${x.since !== undefined ? ` · since #${x.since}` : ''}`)
+      if (s.categories.length) {
+        out.push('By category, as /context counts it:')
+        for (const c of s.categories) out.push(`- ${c.name}: ${k(c.tokens)}`)
+      }
+    }
+    rows(list)
+    if (tab === 'tools')
+      for (const t of s.tools) out.push(`- ${t.name}: ${plural(t.count ?? 0, 'call')}${t.failed ? ` (${t.failed} failed)` : ''} · ${k(t.tokens)} of results in the context`)
+  }
+  if (s.tips.length) {
+    out.push('', '## tips')
+    for (const t of s.tips) out.push(`- ${t.level}: ${t.text}`)
+  }
+  return out.join('\n').trim()
+}

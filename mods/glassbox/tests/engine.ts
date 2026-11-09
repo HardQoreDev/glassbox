@@ -2,7 +2,7 @@
 // cartelle e i suoi branch, due hook nelle impostazioni utente (uno con
 // hook-switch), due plugin con i loro hook, un modello che risponde.
 import type { Engine } from 'claude-code/testing'
-import type { FsEntry, On, ProcessRunResult, SessionContextBreakdown } from 'claude-code'
+import type { FsEntry, ModelForkResult, On, ProcessRunResult, SessionContextBreakdown } from 'claude-code'
 
 const F = '\x1f'
 const R = '\x1e'
@@ -178,6 +178,12 @@ export const REPLIES: { chunks: Record<string, unknown>[]; usage: [number, numbe
 // Il contesto per categoria che /context darebbe; senza, nessuno.
 export const BREAKDOWN: { value?: Partial<SessionContextBreakdown> } = {}
 
+// Quello che `$.model.fork` risponde, e i prompt che ha ricevuto.
+export const FORK: { reply: ModelForkResult; prompts: string[] } = {
+  reply: { isAnswered: true, text: '## What the context holds\nIl login.\n### Dettagli\n**Poco** da togliere.', usage: { input_tokens: 10, output_tokens: 1200, cache_read_input_tokens: 14_000, cache_creation_input_tokens: 0 } },
+  prompts: [],
+}
+
 /** Lascia finire il lavoro che il mod fa fuori dal giro degli strumenti. */
 export async function settle(): Promise<void> {
   for (let i = 0; i < 100; i++) await Promise.resolve()
@@ -198,6 +204,7 @@ export function fakeEngine(on: On, opened: string[] = []) {
     return { value: { startedAt: 0, context: { window: 200_000, ...breakdown }, rateLimits: [] } } as never
   })
   on('session.id', () => ({ value: 's1' }))
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   on('prompt.compose', () => ({
     sections: [
       { id: 'intro', text: 'You are Claude Code.', scope: 'shared' as const },
@@ -215,6 +222,10 @@ export function fakeEngine(on: On, opened: string[] = []) {
     const { path, text } = e as unknown as { path: string; text: string }
     FILES[path] = text
     return { value: undefined } as never
+  })
+  on('model.fork', (_, e) => {
+    FORK.prompts.push(e.prompt)
+    return { value: FORK.reply }
   })
   on('command.register', () => ({ value: { command: 'glassbox' } }))
   on('clock.every', () => ({ value: undefined }) as never)

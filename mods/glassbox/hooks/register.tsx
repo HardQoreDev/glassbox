@@ -7,6 +7,7 @@
 // la rotella sotto il puntatore; le altre si prendono lo spazio.
 import type { EngineInterface, Register, RenderElement, ToolCallInput } from 'claude-code'
 
+import { analysis, openAnalysis, runAnalysis } from './analysis'
 import { closeContext, doc, openContext, writeDoc } from './context'
 import { FLASH_MS, readText, refreshDirs, reveal, toggleDir, touch, tree, visibleRows } from './files'
 import type { FileRow, Tone } from './files'
@@ -16,8 +17,10 @@ import { checkRemoteTags, refreshRepo, remoteTags, repo } from './repo'
 import { hooks, loadHooks, toggleHook } from './settings-hooks'
 import { shellWrites, snapshot } from './shell-writes'
 import type { ShellWrite } from './shell-writes'
+import { configureRecord, recordInfo, setRecordVersion } from './record'
+import { statsOf, statsText } from './stats'
 import { record } from './touched'
-import { registerTurns, startTurns, toolDone, turns } from './turns-state'
+import { lastDone, registerTurns, seenNow, startTurns, toolDone, turns } from './turns-state'
 import { fit, len, redraw } from './ui'
 import type { Els, Line } from './ui'
 import { join } from './vendor/filetree'
@@ -151,7 +154,8 @@ const share = (room: number, n: number): number[] =>
 
 const clamp = (v: number, max: number) => Math.max(0, Math.min(max, v))
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  configureRecord(options)
   registerTurns(on)
 
   on('session.start', async ($, e, next) => {
@@ -161,6 +165,7 @@ export const register: Register = on => {
       .read(`${$.plugin.root}/.claude-plugin/plugin.json`)
       .then(text => String((JSON.parse(text) as { version?: unknown }).version ?? ''))
       .catch(() => '')
+    setRecordVersion(version)
     await $.command
       .register({
         name: COMMAND,
@@ -187,7 +192,9 @@ export const register: Register = on => {
     await refreshAll($)
     await $.ui.open({ id: PANE, title: TITLE, columns: COLUMNS, backgroundColor: 'transparent' })
     const hint = e.presentation.isFullscreen ? '' : ' It is above the prompt for now: /tui fullscreen docks it on the right.'
-    return { text: `Glassbox opened.${hint}` }
+    const recorded = recordInfo()
+    const where = recorded ? ` This session is recorded in ${recorded.dir}.` : ''
+    return { text: `Glassbox opened.${hint}${where}` }
   })
 
   // I file che Claude legge (viola) o scrive (arancio) si accendono; di quelli
@@ -268,6 +275,25 @@ export const register: Register = on => {
       redraw($)
     }
 
+    // L'analisi del contesto dell'ultima richiesta: una nuova, o quella già
+    // fatta se l'ultima richiesta è ancora quella.
+    const startAnalysis = () => {
+      const last = lastDone()
+      const measures = statsText(statsOf(turns.ledger, turns.calls, turns.breakdown, seenNow()))
+      void runAnalysis($, last?.n ?? 0, last?.model ?? '', measures, isShown => {
+        if (!isShown && analysis.state !== 'running')
+          $.ui.toast(analysis.state === 'done' ? 'The context analysis is ready: analyze in CONTEXT opens it.' : `Context analysis: ${analysis.error}`)
+        redraw($)
+      })
+    }
+    const analyze = () => {
+      const last = lastDone()
+      if (analysis.state === 'running' || (analysis.state === 'done' && analysis.n === (last?.n ?? 0))) {
+        openAnalysis()
+        redraw($)
+      } else startAnalysis()
+    }
+
     // Un pezzo del contesto prende il posto di tutte le sezioni.
     if (doc.isOpen) {
       const layout = contextLayout(width, bodyRows)
@@ -281,8 +307,9 @@ export const register: Register = on => {
               closeContext()
               redraw($)
             },
+            ...(doc.part === 'analysis' && analysis.state !== 'running' ? { rerun: startAnalysis } : {}),
             open: () =>
-              void writeDoc($)
+              void (doc.part === 'analysis' && analysis.path ? Promise.resolve(analysis.path) : writeDoc($))
                 .then(path => openFile($, path))
                 .catch(err => $.ui.toast(`Could not open ${doc.title}: ${err instanceof Error ? err.message : err}`)),
             slide: left => {
@@ -438,6 +465,7 @@ export const register: Register = on => {
         { key: 'files-refresh', label: '↻', dim: true, press: () => void refreshAll($) },
       ],
       turns: [
+        { key: 'turns-analyze', label: 'analyze', active: analysis.state === 'running', press: analyze },
         {
           key: 'turns-stats',
           label: 'stats',
