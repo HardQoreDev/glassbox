@@ -3,11 +3,14 @@
 // sezione scorre. ◐ lavora; ◆ aspetta te, su una domanda o un permesso; ● ha la cache
 // calda, con i minuti che le restano (gialli sotto i dieci); ○ l'ha persa,
 // rossa se ha tanto contesto da ricaricare; ◌ è stata compattata dopo l'ultima
-// richiesta. Il nome è il titolo del terminale in herdr, quando c'è. Un clic
+// richiesta. ◐ anche per chi aspetta i suoi agenti, con quanti sono: la sua
+// cache la tiene calda glassbox (keepwarm.ts). Il nome è il titolo del
+// terminale in herdr, quando c'è. Un clic
 // sul nome porta herdr sul pane della sessione; ▸ in fondo apre sotto la
 // cartella, cosa costa tornarci e il comando per riprenderla (fuori da herdr,
 // o per questa sessione, lo fa anche il clic sul nome).
-import { CACHE_TTL_MS, RELOAD_FACTOR, SOON_MS, cacheOf, counts, isHeavy, isWaiting, label, merged, minutes, ordered, selfSession, sessions, span, tokens } from './sessions'
+import { keep } from './keepwarm'
+import { CACHE_TTL_MS, RELOAD_FACTOR, SOON_MS, agentsOf, cacheOf, counts, isHeavy, isWaiting, label, merged, minutes, ordered, refreshedAt, selfSession, sessions, span, tokens } from './sessions'
 import type { Cache, Session } from './sessions'
 import { SELECTED_BG, fit, len, wrapText } from './ui'
 import type { Line } from './ui'
@@ -26,6 +29,7 @@ const idle = (s: Session, now: number): string => (s.lastMs === undefined ? '' :
 const markOf = (c: Cache, s: Session): Seg => {
   if (c.kind === 'busy') return { text: '◐', color: BUSY }
   if (isWaiting(s)) return { text: '◆', color: WAITING }
+  if (agentsOf(s) > 0) return { text: '◐', color: BUSY }
   if (c.kind === 'warm') return { text: '●', color: c.leftMs <= SOON_MS ? SOON : WARM }
   if (c.kind === 'cold') return isHeavy(s) ? { text: '○', color: RELOAD } : { text: '○', dim: true }
   if (c.kind === 'compacted') return { text: '◌', dim: true }
@@ -36,6 +40,12 @@ const stateOf = (c: Cache, s: Session, now: number): Seg => {
   if (c.kind === 'busy') return { text: 'working', color: BUSY }
   if (isWaiting(s))
     return { text: c.kind === 'warm' ? `needs you · ${minutes(c.leftMs)}m left` : c.kind === 'cold' && isHeavy(s) ? 'needs you · reload' : 'needs you', color: WAITING }
+  const n = agentsOf(s)
+  if (n > 0) {
+    const agents = `${n} agent${n === 1 ? '' : 's'}`
+    if (c.kind === 'warm') return { text: `${agents} · ${minutes(c.leftMs)}m left`, color: BUSY }
+    return c.kind === 'cold' && isHeavy(s) ? { text: `${agents} · reload`, color: RELOAD } : { text: agents, color: BUSY }
+  }
   if (c.kind === 'warm') return { text: `${minutes(c.leftMs)}m left`, color: c.leftMs <= SOON_MS ? SOON : WARM }
   if (c.kind === 'cold') return isHeavy(s) ? { text: `reload · idle ${idle(s, now)}`, color: RELOAD } : { text: `cold · idle ${idle(s, now)}`, dim: true }
   if (c.kind === 'compacted') return { text: 'compacted', dim: true }
@@ -54,7 +64,7 @@ const detailTexts = (s: Session, c: Cache, now: number): string[] => {
     c.kind === 'busy'
       ? 'Working now: its cache stays warm while it runs.'
       : c.kind === 'warm'
-        ? `Cache warm until ${clock((s.lastMs ?? now) + CACHE_TTL_MS)}, idle ${idle(s, now)}.`
+        ? `Cache warm until ${clock((refreshedAt(s) ?? now) + CACHE_TTL_MS)}, idle ${idle(s, now)}.`
         : c.kind === 'cold' && isHeavy(s)
           ? `The next message rewrites ${tokens(s.ctx)} into the cache: about ${RELOAD_FACTOR} messages at warm cache. If it is done, close it; /clear with a state note costs almost nothing.`
           : c.kind === 'cold'
@@ -62,8 +72,18 @@ const detailTexts = (s: Session, c: Cache, now: number): string[] => {
             : c.kind === 'compacted'
               ? 'Compacted after its last request: its context is small now.'
               : 'No request yet.'
+  const n = agentsOf(s)
+  const agents =
+    n > 0
+      ? [`${n} agent${n === 1 ? '' : 's'} working. While they do, Glassbox in that session keeps its cache warm: a minimal request 5 minutes before it expires, which reads the context from the cache (about 1/${RELOAD_FACTOR} of rewriting it).`]
+      : []
+  const kept =
+    s.id === sessions.selfId && keep.pings > 0
+      ? [`Kept warm ${keep.pings} time${keep.pings === 1 ? '' : 's'}, last at ${clock(keep.lastMs)}: ${tokens(keep.read)} read from the cache${keep.written > 0 ? `, ${tokens(keep.written)} written` : ''}.`]
+      : []
+  const failed = s.id === sessions.selfId && keep.error ? [`Last keep-warm failed: ${keep.error}.`] : []
   const where = [s.title ? s.name : '', s.cwd, s.pane ? `herdr ${s.pane}` : ''].filter(Boolean).join(' · ')
-  return [where, ...waits, cost, `claude --resume ${s.id}`].filter(Boolean)
+  return [where, ...waits, ...agents, cost, ...kept, ...failed, `claude --resume ${s.id}`].filter(Boolean)
 }
 
 /** Si può portare herdr lì: gira in herdr, e non è questa. */

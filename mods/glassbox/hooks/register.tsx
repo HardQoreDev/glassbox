@@ -25,6 +25,7 @@ import { configureRecord, recordInfo, setRecordVersion } from './record'
 import { EVERY_MS as SESSIONS_EVERY_MS, focusSession, label, refreshSessions, resetOwn, sessions, tick } from './sessions'
 import type { Session } from './sessions'
 import { contestedPaths, refreshGuard } from './guard'
+import { keepWarm } from './keepwarm'
 import { statsOf, statsText } from './stats'
 import { record } from './touched'
 import { lastDone, registerTurns, seenNow, startTurns, toolDone, turns } from './turns-state'
@@ -169,11 +170,13 @@ const share = (room: number, n: number): number[] =>
 
 const clamp = (v: number, max: number) => Math.max(0, Math.min(max, v))
 
-// Le sessioni si rileggono, poi gli avvisi, la guardia e il pannello.
+// Le sessioni si rileggono, poi gli avvisi, il pannello, la cache da tenere
+// calda se gli agenti di questa sessione lavorano, e la guardia.
 async function refreshSessionsView($: EngineInterface, fresh = false): Promise<void> {
   await refreshSessions($, fresh)
   tick($)
   redraw($)
+  if (await keepWarm($)) redraw($)
   await refreshGuardView($)
 }
 

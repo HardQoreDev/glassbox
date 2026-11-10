@@ -182,6 +182,8 @@ export const HERDR_FOCUS: string[] = []
 // Le righe che il mod ha messo nella status line, dalla più vecchia.
 export const STATUS_LINES: (string | undefined)[] = []
 export const RUNS: string[][] = []
+// Le sessioni di cui glassbox ha segnato la cache tenuta calda (bin/sessions.py --warm).
+export const WARMED: string[] = []
 // Per GUARD: l'ora (in secondi) dell'ultimo commit di ogni file, per nome, e
 // le cartelle fuori da git.
 export const GUARD = { commits: {} as Record<string, string>, outside: new Set<string>() }
@@ -276,7 +278,11 @@ export function fakeEngine(on: On, opened: string[] = []) {
   })
   on('process.run', (_, e) => {
     // bin/sessions.py gira da solo ogni minuto: non è un comando del test.
-    if (e.argv[0] === 'python3' && String(e.argv[2] ?? '').endsWith('/bin/sessions.py')) return ok(SESSIONS.out)
+    if (e.argv[0] === 'python3' && String(e.argv[2] ?? '').endsWith('/bin/sessions.py')) {
+      if (e.argv[3] !== '--warm') return ok(SESSIONS.out)
+      WARMED.push(String(e.argv[4]))
+      return ok('')
+    }
     // herdr: risponde in JSON, ed esce con 0 anche quando il pane non c'è.
     if (e.argv[0] === '/bin/herdr' && e.argv[1] === 'agent' && e.argv[2] === 'focus') {
       const pane = String(e.argv[3])

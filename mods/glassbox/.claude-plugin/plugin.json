@@ -1,7 +1,7 @@
 {
   "name": "glassbox",
-  "version": "0.15.0",
-  "description": "Claude Code as a glass box: a pane on the right with the session's hooks to switch off, the active git branches, the files changed in the session and a guard that lights up when another open session is changing the same files, what goes into the context of every request, with stats and tips to keep it lean, and the open sessions with the state of their prompt cache",
+  "version": "0.16.0",
+  "description": "Claude Code as a glass box: a pane on the right with the session's hooks to switch off, the active git branches, the files changed in the session and a guard that lights up when another open session is changing the same files, what goes into the context of every request, with stats and tips to keep it lean, and the open sessions with the state of their prompt cache, kept warm while a session waits for its agents",
   "author": {
     "name": "HardQoreDev"
   },

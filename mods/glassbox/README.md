@@ -94,6 +94,7 @@ What the other sessions wrote comes from their transcripts: [`bin/sessions.py`](
 The prompt cache lasts an hour from a session's last request. After that, the next message writes the whole context into the cache again, and writing a token costs about twenty times reading it: coming back to a 600k session left idle since yesterday costs about as much as twenty messages at warm cache. With many sessions open, each one goes cold while you work on the others. SESSIONS shows which ones are still warm and which ones would reload from scratch:
 
 - `◐ working`: running a turn; its cache stays warm while it runs.
+- `◐ 2 agents · 41m left`: waiting for its agents (see below), with its cache time.
 - `◆ needs you`: stopped on a question or a permission, with its cache time.
 - `● 41m left`: warm, with the minutes left; yellow under ten.
 - `○ reload · idle 2d`: cold with 150k or more of context, in red: the next message reloads it all. `○ cold` is cold but light, cheap to reload.
@@ -103,9 +104,15 @@ This session is on top, marked with a `▌` bar and **this** before its name, an
 
 When the sessions run in [herdr](https://herdr.dev), each row shows the title of its terminal (what the session is working on) instead of the registry name, and a click on it brings herdr to that session's pane (`herdr agent focus <pane>`). `▸` at the end of the row opens the details below it: the registry name, the folder, the herdr pane, what coming back to it costs, and the `claude --resume` command. For this session, and for one outside herdr, the click on the name opens the details too.
 
-With the pane closed too, a toast says five minutes before a heavy (150k or more) idle cache expires, this session's or another's, once per expiry. Glassbox keeps nothing under the prompt: a countdown of this session's cache belongs in your own status line, which gets the transcript path on its input.
+With the pane closed too, a toast says five minutes before a heavy (150k or more) idle cache expires, this session's or another's, once per expiry; not for a session whose agents are working. Glassbox keeps nothing under the prompt: a countdown of this session's cache belongs in your own status line, which gets the transcript path on its input.
 
 The list comes from [`bin/sessions.py`](bin/sessions.py), which needs `python3`. Claude Code keeps a registry of its running sessions in `~/.claude/sessions/<pid>.json`; the script keeps the interactive ones whose process is still the registered one, and reads the tail of each transcript for the time and the context of the last request of the main thread (subagents excluded). If `herdr` is installed (`HERDR_BIN_PATH` or on the `PATH`), `herdr agent list` gives each session's pane and terminal title. Every session with Glassbox runs it once a minute: so that twenty sessions do not repeat the same work, the result is shared for 45 seconds in a private file in the temporary folder (`claude-glassbox-sessions-<uid>.json`). A session counts as warm until an hour after its last request; under usage overage the cache lasts five minutes, which the section does not know.
+
+### Sessions waiting for their agents
+
+A session that launched its own agents (a review, a search) waits for them: its main thread sends no request until they report back, and after an hour its cache expires although the session is anything but idle. The agents do not keep it warm, since they run on a prompt of their own. So while a session has agents working, Glassbox keeps its cache warm: five minutes before it expires it sends one minimal request with `$.model.fork`, which sends the main thread's last request again with one line after it, so the API reads the whole context from the cache and the hour starts over. It costs one cache read of the context, about a twentieth of rewriting it, and it is never sent once the cache is already cold, when it would cost a full rewrite. The details of this session say how many times it was kept warm and how much each one read.
+
+An agent counts as working when the `meta.json` Claude Code keeps beside its transcript (`<session>/subagents/agent-<id>.meta.json`) does not say `finished` yet and it wrote something in the last two hours: an agent left unfinished by a session that was closed or restarted stops counting after that. Each refresh is marked with `bin/sessions.py --warm <session id>`, a file named after the session in a private folder of the temporary directory (`claude-glassbox-warm-<uid>/`), so that the other sessions, a status line or a hook can count it as the session's last request.
 
 ## Commands
 

@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -158,6 +159,39 @@ def main():
             f.write("\n")
         names = [w[0] for w in {s["id"]: s for s in run("--fresh")["sessions"]}["writer"]["writes"]]
         check("finita la riga, entra", names[:1] == ["/w/meta.ts"] and names.count("/w/a.ts") == 1, names)
+
+        # Gli agenti al lavoro: non finiti e con una scrittura nelle ultime due ore.
+        sub = os.path.join(cfg, "projects", "p", "writer", "subagents")
+
+        def agent(name, finished, hours_ago):
+            meta, log = os.path.join(sub, f"agent-{name}.meta.json"), os.path.join(sub, f"agent-{name}.jsonl")
+            with open(meta, "w") as f:
+                json.dump({"agentType": "reviser", **({"finished": True} if finished else {})}, f)
+            with open(log, "a") as f:
+                f.write("{}\n")
+            then = time.time() - hours_ago * 3600
+            os.utime(meta, (then, then))
+            os.utime(log, (then, then))
+
+        agent("finito", True, 0)
+        agent("lavora", False, 0.5)
+        agent("appeso", False, 3)
+        w = {s["id"]: s for s in run("--fresh")["sessions"]}["writer"]
+        check("agenti: solo quello non finito e recente", w.get("agents") == 1, w.get("agents"))
+        check("nessun rinfresco ancora", "warmMs" not in w, w.get("warmMs"))
+
+        # --warm segna il rinfresco in un file privato, che la lettura dopo riporta.
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg, TMPDIR=tmp)
+        r = subprocess.run([sys.executable, "-I", SCRIPT, "--warm", "writer"], env=env, capture_output=True, timeout=10)
+        warm_dir = os.path.join(tmp, f"claude-glassbox-warm-{os.getuid()}")
+        mark = os.path.join(warm_dir, "writer")
+        check("--warm: il segno c'è, privato", r.returncode == 0 and os.path.exists(mark)
+              and oct(os.stat(mark).st_mode & 0o777) == "0o600" and oct(os.stat(warm_dir).st_mode & 0o777) == "0o700",
+              (r.returncode, r.stderr))
+        w = {s["id"]: s for s in run("--fresh")["sessions"]}["writer"]
+        check("il rinfresco arriva come warmMs", abs(w.get("warmMs", 0) - time.time() * 1000) < 5_000, w.get("warmMs"))
+        bad = subprocess.run([sys.executable, "-I", SCRIPT, "--warm", "../fuori"], env=env, capture_output=True, timeout=10)
+        check("--warm con un id strano: rifiuta", bad.returncode == 2 and not os.path.exists(os.path.join(tmp, "fuori")), bad.returncode)
     finally:
         for s in sleeps:
             s.kill()

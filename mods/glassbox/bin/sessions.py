@@ -18,6 +18,13 @@ compresi. I transcript arrivano a centinaia di mega, e si leggono una volta
 sola: un indice (WRITES) tiene per ognuno fin dove è stato letto, e ai giri
 dopo si leggono solo le righe aggiunte.
 
+Di ogni sessione esce anche quanti agenti ha al lavoro (i suoi subagent non
+ancora finiti che hanno scritto nelle ultime AGENTS_H ore: quelli più vecchi
+sono rimasti appesi a una sessione chiusa o riavviata), e quando glassbox ne
+ha tenuto calda la cache l'ultima volta mentre lavoravano: `--warm <id>` lo
+segna in WARM, un file per sessione che leggono anche l'hook sessioni-fredde
+e la status line.
+
 Glassbox lo chiama ogni minuto in ogni sessione aperta: perché venti sessioni
 non rifacciano lo stesso lavoro, il risultato resta in un file per FRESH_S
 secondi e chi chiama in quel tempo rilegge quello; chi arriva mentre un'altra
@@ -45,6 +52,8 @@ TMP = os.environ.get("TMPDIR") or "/tmp"
 CACHE = os.path.join(TMP, f"claude-glassbox-sessions-{os.getuid()}.json")
 WRITES = os.path.join(TMP, f"claude-glassbox-writes-{os.getuid()}.json")
 LOCK = os.path.join(TMP, f"claude-glassbox-sessions-{os.getuid()}.lock")
+WARM = os.path.join(TMP, f"claude-glassbox-warm-{os.getuid()}")
+AGENTS_H = 2
 SID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 # Di ogni sessione escono al massimo tanti file scritti, dai più recenti, e
 # solo quelli scritti negli ultimi WRITES_DAYS giorni.
@@ -226,6 +235,53 @@ def writes_of(sid, main, old, new):
     return [[f, t] for f, t in recent[:MAX_WRITES]]
 
 
+def agents_of(sid, main, now):
+    """Quanti agenti della sessione sono al lavoro: il meta.json accanto al loro
+    transcript non dice ancora finished, e hanno scritto nelle ultime AGENTS_H ore."""
+    if not main:
+        return 0
+    n = 0
+    for meta in glob.glob(os.path.join(os.path.dirname(main), sid, "subagents", "*.meta.json")):
+        try:
+            with open(meta) as f:
+                if json.load(f).get("finished") is True:
+                    continue
+            last = os.path.getmtime(meta)
+            log = meta[: -len(".meta.json")] + ".jsonl"
+            if os.path.exists(log):
+                last = max(last, os.path.getmtime(log))
+        except (OSError, ValueError, AttributeError):
+            continue
+        if now - last < AGENTS_H * 3600:
+            n += 1
+    return n
+
+
+def warm_ms(sid):
+    """L'ultima volta che glassbox ha tenuto calda la cache della sessione, o None."""
+    try:
+        return int(os.path.getmtime(os.path.join(WARM, sid)) * 1000)
+    except OSError:
+        return None
+
+
+def mark_warm(sid):
+    """Segna che la cache della sessione è stata rinfrescata adesso; toglie i segni di più di due giorni."""
+    if not SID_RE.match(sid):
+        raise SystemExit(2)
+    os.makedirs(WARM, mode=0o700, exist_ok=True)
+    now = time.time()
+    for f in glob.glob(os.path.join(WARM, "*")):
+        try:
+            if now - os.path.getmtime(f) > 2 * 86400:
+                os.remove(f)
+        except OSError:
+            pass
+    fd = os.open(os.path.join(WARM, sid), os.O_WRONLY | os.O_CREAT, 0o600)
+    os.close(fd)
+    os.utime(os.path.join(WARM, sid), (now, now))
+
+
 def collect():
     out = []
     exe, panes = herdr_agents()
@@ -244,6 +300,10 @@ def collect():
         s.update(tail_state(main))
         s.update(panes.get(sid, {}))
         s["writes"] = writes_of(sid, main, old, new)
+        s["agents"] = agents_of(sid, main, time.time())
+        warm = warm_ms(sid)
+        if warm:
+            s["warmMs"] = warm
         out.append(s)
     save_index(new)
     return {"at": int(time.time() * 1000), "base": BASE, "herdr": exe if panes else "", "sessions": out}
@@ -276,6 +336,9 @@ def take_turn():
 
 
 def main():
+    if sys.argv[1:2] == ["--warm"]:
+        mark_warm(sys.argv[2] if len(sys.argv) > 2 else "")
+        return
     fresh = "--fresh" in sys.argv[1:]
     found = None if fresh else cached()
     if found is None:

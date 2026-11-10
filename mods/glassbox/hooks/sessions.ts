@@ -8,6 +8,10 @@
 // seguente riscrive in cache tutto il contesto, e scrivere un token costa circa
 // venti volte rileggerlo: tornare a una sessione da 600k ferma da ieri costa
 // come una ventina di messaggi a cache calda.
+//
+// Una sessione che aspetta i suoi agenti non è ferma: glassbox (keepwarm.ts)
+// le tiene calda la cache, e l'ultima volta che l'ha fatto (warmMs) conta come
+// l'ultima richiesta.
 import type { EngineInterface } from 'claude-code'
 
 /** La cache dei prompt dura un'ora dall'ultima richiesta. */
@@ -36,6 +40,10 @@ export type Session = {
   title?: string
   // I file che ha scritto con Edit e Write, con l'ora dell'ultima volta: per GUARD.
   writes?: ReadonlyMap<string, number>
+  // Quanti suoi agenti sono al lavoro.
+  agents?: number
+  // L'ultima volta che glassbox le ha tenuto calda la cache mentre gli agenti lavoravano.
+  warmMs?: number
 }
 
 export type Cache =
@@ -60,14 +68,27 @@ export const sessions = {
 
 // Questa sessione, dalle sue richieste: più fresca dello script, che legge il
 // transcript al massimo una volta al minuto.
-const own: { lastMs?: number; ctx?: number } = {}
+const own: { lastMs?: number; ctx?: number; warmMs?: number } = {}
 // Gli avvisi già dati, per sessione e richiesta: uno solo per ogni scadenza.
 const warned = new Set<string>()
 
 export function resetOwn(): void {
   delete own.lastMs
   delete own.ctx
+  delete own.warmMs
 }
+
+/** Glassbox ha appena tenuto calda la cache di questa sessione. */
+export function ownWarmed(now: number): void {
+  own.warmMs = now
+}
+
+/** L'ultima volta che la cache della sessione è stata letta: la sua ultima richiesta, o un rinfresco di glassbox. */
+export const refreshedAt = (s: Session): number | undefined =>
+  s.lastMs === undefined ? undefined : Math.max(s.lastMs, s.warmMs ?? 0)
+
+/** Quanti agenti della sessione sono al lavoro. */
+export const agentsOf = (s: Session): number => s.agents ?? 0
 
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 
@@ -95,6 +116,8 @@ export function readSessions(stdout: string): { list: Session[]; error: string; 
       ...(typeof r.pane === 'string' && PANE_RE.test(r.pane) ? { pane: r.pane } : {}),
       ...(typeof r.title === 'string' && r.title ? { title: r.title } : {}),
       ...writesOf(r.writes),
+      ...(num(r.agents) ? { agents: num(r.agents) } : {}),
+      ...(num(r.warmMs) ? { warmMs: num(r.warmMs) } : {}),
     })
   }
   return { list, error: typeof o.error === 'string' ? o.error : '', herdr: typeof o.herdr === 'string' ? o.herdr : '' }
@@ -136,18 +159,22 @@ export async function focusSession($: EngineInterface, s: Session): Promise<stri
 export function cacheOf(s: Session, now: number): Cache {
   if (s.status === 'busy') return { kind: 'busy' }
   if (s.isCompacted) return { kind: 'compacted' }
-  if (s.lastMs === undefined) return { kind: 'unknown' }
-  const left = s.lastMs + CACHE_TTL_MS - now
-  return left > 0 ? { kind: 'warm', leftMs: left } : { kind: 'cold', sinceMs: now - s.lastMs - CACHE_TTL_MS }
+  const at = refreshedAt(s)
+  if (at === undefined) return { kind: 'unknown' }
+  const left = at + CACHE_TTL_MS - now
+  return left > 0 ? { kind: 'warm', leftMs: left } : { kind: 'cold', sinceMs: now - at - CACHE_TTL_MS }
 }
 
 /** Le sessioni con questa aggiornata dalle sue richieste, se sono più recenti. */
 export function merged(list: readonly Session[] = sessions.list, selfId = sessions.selfId): Session[] {
-  return list.map(s =>
-    s.id === selfId && own.lastMs !== undefined && (s.lastMs === undefined || own.lastMs > s.lastMs || s.isCompacted)
-      ? { ...s, lastMs: own.lastMs, ctx: own.ctx, isCompacted: false }
-      : s,
-  )
+  return list.map(s => {
+    if (s.id !== selfId) return s
+    const fresher =
+      own.lastMs !== undefined && (s.lastMs === undefined || own.lastMs > s.lastMs || s.isCompacted)
+        ? { ...s, lastMs: own.lastMs, ctx: own.ctx, isCompacted: false }
+        : s
+    return own.warmMs !== undefined && own.warmMs > (fresher.warmMs ?? 0) ? { ...fresher, warmMs: own.warmMs } : fresher
+  })
 }
 
 /** Questa sessione: dal registro se c'è, altrimenti solo dalle sue richieste. */
@@ -155,7 +182,16 @@ export function selfSession(): Session | undefined {
   const found = merged().find(s => s.id === sessions.selfId)
   if (found) return found
   if (own.lastMs === undefined) return undefined
-  return { id: sessions.selfId, name: 'this session', cwd: '', status: '', lastMs: own.lastMs, ctx: own.ctx, isCompacted: false }
+  return {
+    id: sessions.selfId,
+    name: 'this session',
+    cwd: '',
+    status: '',
+    lastMs: own.lastMs,
+    ctx: own.ctx,
+    isCompacted: false,
+    ...(own.warmMs !== undefined ? { warmMs: own.warmMs } : {}),
+  }
 }
 
 const rank = (c: Cache): number => ({ busy: 0, warm: 1, compacted: 2, cold: 3, unknown: 4 })[c.kind]
@@ -202,14 +238,18 @@ export const minutes = (ms: number): number => Math.max(1, Math.ceil(ms / 60_000
 export const span = (ms: number): string =>
   ms < 3_600_000 ? `${Math.max(1, Math.floor(ms / 60_000))}m` : ms < 48 * 3_600_000 ? `${Math.floor(ms / 3_600_000)}h` : `${Math.floor(ms / 86_400_000)}d`
 
-/** Gli avvisi da dare adesso: le cache pesanti e ferme a cui mancano WARN_MS o meno. Uno per scadenza. */
+/**
+ * Gli avvisi da dare adesso: le cache pesanti e ferme a cui mancano WARN_MS o
+ * meno. Uno per scadenza. Non per chi ha agenti al lavoro: la sua cache la
+ * tiene calda glassbox.
+ */
 export function dueWarnings(list: readonly Session[], now: number, selfId: string, given: Set<string> = warned): string | undefined {
   const parts: string[] = []
   let isSelf = false
   for (const s of list) {
     const c = cacheOf(s, now)
-    if (c.kind !== 'warm' || c.leftMs > WARN_MS || !isHeavy(s)) continue
-    const key = `${s.id}:${s.lastMs}`
+    if (c.kind !== 'warm' || c.leftMs > WARN_MS || !isHeavy(s) || agentsOf(s) > 0) continue
+    const key = `${s.id}:${refreshedAt(s)}`
     if (given.has(key)) continue
     given.add(key)
     if (s.id === selfId) isSelf = true
