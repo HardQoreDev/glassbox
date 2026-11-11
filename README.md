@@ -50,6 +50,10 @@ install -m 755 mods/glassbox/bin/hook-switch ~/.claude/hooks/hook-switch
 - Uno strumento che riscrive il proprio hook nelle impostazioni (herdr quando si aggiorna, per esempio) può togliere `hook-switch`: la riga torna `ALWAYS`.
 - Non c'è uno spegnimento permanente in un file, perché quel file potrebbe scriverlo anche Claude. La variabile della sessione la cambia solo Glassbox: i comandi lanciati da Claude hanno un ambiente loro.
 
+### Voxbox
+
+Il gemello di Glassbox, nello stesso pannello a destra: un clic sul logo, o su `⇄`, passa dall'uno all'altro con una breve transizione. Prende una selezione (premi **REC**, selezioni in herdr, e la copia arriva qui; in modo concatena le copie si aggiungono una dopo l'altra) o l'ultima risposta di Claude (**CP**), e la mostra **RAW**, dove si può modificare, in **VOX** (prosa: srotolata e spiegata) o in **SYNTH** (sintesi: poche righe telegrafiche), con `◂ ▸` per modularne la lunghezza. VOX e SYNTH li scrive Haiku dall'interno della sessione, oppure un fork della sessione che ne conosce il contesto, senza aggiungere risposte alla chat; i loro prompt si cambiano dal pannello. `▶` legge il testo ad alta voce con Piper e una voce italiana locale, l'audio esce dal lato Windows. Per ora richiede WSL su Windows e un setup una tantum (`mods/voxbox/bin/setup.sh`). Dettagli in [`mods/voxbox/README.md`](mods/voxbox/README.md).
+
 ### copia-risposta
 
 Tre pulsanti in basso a destra, accanto al prompt:
@@ -67,6 +71,7 @@ Al prompt di una sessione di Claude Code:
 ```
 /plugin install glassbox --marketplace HardQoreDev/glassbox
 /plugin install copia-risposta --marketplace HardQoreDev/glassbox
+/plugin install voxbox --marketplace HardQoreDev/glassbox
 ```
 
 Rispondi `y` per aggiungere il marketplace, poi scegli dove installare. Da una shell è lo stesso:
@@ -74,7 +79,10 @@ Rispondi `y` per aggiungere il marketplace, poi scegli dove installare. Da una s
 ```bash
 claude plugin install glassbox --marketplace HardQoreDev/glassbox
 claude plugin install copia-risposta --marketplace HardQoreDev/glassbox
+claude plugin install voxbox --marketplace HardQoreDev/glassbox
 ```
+
+Voxbox vuole anche la sua voce, una volta sola: `mods/voxbox/bin/setup.sh` da un clone della repo.
 
 Poi apri una nuova sessione. Per gli aggiornamenti: `claude plugin update glassbox` (e lo stesso per `copia-risposta`), poi `/reload-plugins`.
 

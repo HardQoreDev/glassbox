@@ -37,14 +37,28 @@ const gradient = (el: Els, text: string, light: number): RenderElement[] => {
   return chars.map((ch, i) => (ch === ' ' ? <el.Text> </el.Text> : <el.Text color={shade(i / Math.max(1, chars.length - 1), light)}>{ch}</el.Text>))
 }
 
-/** Le righe del titolo, l'ultima vuota a staccarlo dalle sezioni. */
-export function titleLines(el: Els, width: number, version: string): RenderElement[] {
+// Lo scambio con Voxbox, sotto il motto (vedi twin.ts).
+const SWAP = '⇄ voxbox'
+
+/**
+ * Le righe del titolo, l'ultima vuota a staccarlo dalle sezioni. Con `onSwap`
+ * (Voxbox è caricato) quell'ultima riga porta a destra lo scambio, se ci sta,
+ * e anche il logo lo fa al clic.
+ */
+export function titleLines(el: Els, width: number, version: string, onSwap?: () => void): RenderElement[] {
   const tag = version ? `v${version}` : ''
   const logoW = len(LEFT) + len(LOGO[0]!)
   const row = (key: string, left: RenderElement[], leftW: number, right: string, italic: boolean) => (
     <el.Box key={key} flexDirection="row" height={1} overflow="hidden">
       <el.Text>{LEFT}</el.Text>
-      {left}
+      {onSwap ? (
+        // Anche il logo passa a Voxbox; `inverse: false` gli toglie l'inversione sotto il puntatore.
+        <el.Button key={`${key}:logo`} plain hover={{ scope: 'glassbox-logo', inverse: false }} onPress={onSwap}>
+          {left}
+        </el.Button>
+      ) : (
+        left
+      )}
       {right && width - leftW - len(right) >= 2 ? (
         <el.Text dimColor italic={italic}>{`${' '.repeat(width - leftW - len(right))}${right}`}</el.Text>
       ) : (
@@ -52,11 +66,19 @@ export function titleLines(el: Els, width: number, version: string): RenderEleme
       )}
     </el.Box>
   )
-  const blank = (
-    <el.Box key="title:gap" height={1}>
-      <el.Text> </el.Text>
-    </el.Box>
-  )
+  const blank =
+    onSwap && width - len(SWAP) >= len(LEFT) ? (
+      <el.Box key="title:gap" flexDirection="row" height={1} overflow="hidden">
+        <el.Text>{' '.repeat(width - len(SWAP))}</el.Text>
+        <el.Button key="title:swap" plain onPress={onSwap}>
+          <el.Text color={shade(1)}>{SWAP}</el.Text>
+        </el.Button>
+      </el.Box>
+    ) : (
+      <el.Box key="title:gap" height={1}>
+        <el.Text> </el.Text>
+      </el.Box>
+    )
   if (width < logoW + 1) {
     const word = 'G L A S S B O X'
     return [row('title:0', gradient(el, word, 1), len(LEFT) + len(word), tag, false), blank]

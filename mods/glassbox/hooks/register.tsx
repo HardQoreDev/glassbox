@@ -43,6 +43,8 @@ import { previewLayout, previewLines } from './view-preview'
 import { SESSIONS_COLOR, sessionLines, sessionsInfo, sessionsPinned } from './view-sessions'
 import { tagLines, tagView, tagsInfo } from './view-tags'
 import { titleLines } from './view-title'
+import { twin } from './twin'
+import type { Glassbox, GlassboxTurn } from '../types'
 import type { PreviewLayout } from './view-preview'
 import { INPUT_RAIL, turnLines, turnsInfo } from './view-turns'
 
@@ -202,6 +204,29 @@ export const register: Register = (on, options) => {
   configureRecord(options)
   registerTurns(on)
 
+  // Il pannello condiviso con Voxbox (hooks/twin.ts).
+  on('engine.create', async (_$, e, next) => {
+    if (e.plugins.includes('voxbox')) twin.hasVoxbox = true
+    const built = await next(e)
+    const setTurn = async (turn: GlassboxTurn) => {
+      twin.turn = turn
+      built.ui.invalidate('ui.render')
+    }
+    const glassbox: Glassbox = {
+      turn: async () => twin.turn,
+      setTurn,
+      join: async () => {
+        twin.hasVoxbox = true
+        built.ui.invalidate('ui.render')
+      },
+      show: async turn => {
+        await setTurn(turn)
+        await built.ui.open({ id: PANE, title: TITLE, columns: COLUMNS, backgroundColor: 'transparent' })
+      },
+    }
+    return { ...built, glassbox }
+  })
+
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await startTurns($)
@@ -267,7 +292,8 @@ export const register: Register = (on, options) => {
     return ran
   }).catch(($, e, next) => next(e))
 
-  on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e) => {
+  on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    if (twin.turn !== 'glassbox') return next(e)
     if (doc.isOpen) {
       if (contextAt && e.pointer?.row === contextAt.sliderRow) doc.left = clamp(doc.left + e.by * SLIDER_WHEEL, contextAt.maxLeft)
       else doc.offset = clamp(doc.offset + e.by * (e.pointer ? PREVIEW_WHEEL : 1), contextAt?.maxTop ?? 0)
@@ -295,6 +321,7 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
+    if (twin.turn !== 'glassbox') return next(e)
     const el: Els = $.ui.resolve(e)
     const { Box, Button, Text } = el
     const width = Math.max(24, e.props.bodyColumns)
@@ -656,7 +683,11 @@ export const register: Register = (on, options) => {
     const hookRows = lines.hooks ? Math.min(HOOK_ROWS, lines.hooks.length) : 0
     const shared = SECTIONS.filter(s => isOpen[s.id] && s.id !== 'hooks')
     // In cima il titolo, quando il pannello è alto abbastanza.
-    const title = bodyRows >= TITLE_MIN_ROWS ? titleLines(el, width, version) : []
+    const toVoxbox = () => {
+      twin.turn = 'voxbox'
+      redraw($)
+    }
+    const title = bodyRows >= TITLE_MIN_ROWS ? titleLines(el, width, version, twin.hasVoxbox ? toVoxbox : undefined) : []
     const heights = share(Math.max(0, bodyRows - title.length - headerRows - hookRows), shared.length)
     const out: RenderElement[] = [...title]
     const nextSpans: typeof spans = []

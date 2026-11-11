@@ -1,6 +1,6 @@
 {
   "name": "glassbox",
-  "description": "I mod di Claude Code di HardQoreDev: Glassbox (hook, branch, file e cosa entra nel contesto) e pulsanti di copia",
+  "description": "I mod di Claude Code di HardQoreDev: Glassbox (hook, branch, file e cosa entra nel contesto), Voxbox (ascolta e semplifica le risposte) e pulsanti di copia",
   "owner": {
     "name": "HardQoreDev"
   },
@@ -12,6 +12,10 @@
     {
       "name": "copia-risposta",
       "source": "./mods/copia-risposta"
+    },
+    {
+      "name": "voxbox",
+      "source": "./mods/voxbox"
     }
   ]
 }
