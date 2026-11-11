@@ -69,6 +69,15 @@ const st = {
   text: '',
   // Cresce quando il testo cambia da fuori (cattura, CP, svuota): il campo si ridisegna.
   textKey: 0,
+  // RAW in modifica: la ✎ accanto al cestino lo accende e lo spegne.
+  rawEditing: false,
+  // Cresce a ogni apertura di ✎: il campo è sempre nuovo, e Claude Code non
+  // ripropone quello che aveva svuotato all'Invio di prima.
+  rawSession: 0,
+  // L'editor del prompt nel pannello: le bozze, e una chiave che cambia quando le si riscrive da qui.
+  draft: '',
+  draftParams: '',
+  editKey: 0,
   version: 0, // cresce a ogni cambio della sorgente: le uscite vecchie non valgono più
   mode: 'replace' as 'replace' | 'append',
   // REC: fin quando resta acceso (ms).
@@ -82,9 +91,6 @@ const st = {
   note: '',
   error: '',
   editing: undefined as Kind | undefined,
-  draft: '',
-  draftParams: '',
-  editKey: 0,
 }
 const outputs = new Map<string, Output>()
 let prompts: Prompts = DEFAULTS
@@ -104,6 +110,19 @@ const outputKey = (kind: Kind) => `${st.version}:${kind}:${st.level[kind]}:${eff
 function shownText(): string {
   if (st.view === 'raw') return sourceText()
   return outputs.get(outputKey(st.view))?.text ?? ''
+}
+
+// ✎ modifica il testo della vista aperta. RAW è il master: cambiarlo fa
+// riscrivere VOX e SYNTH; cambiare VOX o SYNTH tocca solo quel testo generato.
+function setShownText(value: string): void {
+  if (st.view === 'raw') {
+    st.text = value
+    st.version++
+    return
+  }
+  const key = outputKey(st.view)
+  const out = outputs.get(key)
+  if (out) outputs.set(key, { ...out, text: value })
 }
 
 // ---- le azioni -------------------------------------------------------------
@@ -264,6 +283,7 @@ async function pressReply($: EngineInterface): Promise<void> {
 }
 
 function pressClear($: EngineInterface): void {
+  st.rawEditing = false
   setSource(() => {
     st.text = ''
     st.source = 'clip'
@@ -310,6 +330,7 @@ async function generate($: EngineInterface, kind: Kind): Promise<void> {
 }
 
 function pressView($: EngineInterface, view: View): void {
+  if (view !== st.view) st.rawEditing = false
   st.view = view
   st.offset = 0
   if (view !== 'raw') void generate($, view)
@@ -355,13 +376,17 @@ async function pressSpeak($: EngineInterface): Promise<void> {
   }
 }
 
-function openEditor($: EngineInterface, kind: Kind): void {
+// ✎ accanto a VOX o SYNTH: il prompt e i suoi parametri si modificano nel pannello.
+function openEditor($: EngineInterface, kind: Kind, site: string): void {
+  editSite = site
   st.editing = kind
   st.draft = prompts[kind].template
   st.draftParams = paramsText(kind, prompts)
   st.editKey++
   st.error = ''
+  st.note = ''
   redraw($)
+  void tryFocus($, site, `edit-template-${st.editKey}`)
 }
 
 async function saveEditor($: EngineInterface): Promise<void> {
@@ -373,10 +398,12 @@ async function saveEditor($: EngineInterface): Promise<void> {
   await $.store.set(STORE_KEY, prompts)
   outputs.clear()
   st.editing = undefined
-  st.note = parsed.errors.length > 0 ? `Salvato, ma: ${parsed.errors.join('; ')}` : 'Prompt salvato.'
+  st.note = parsed.errors.length > 0 ? `Prompt ${NAMES[kind]} salvato, ma: ${parsed.errors.join('; ')}` : `Prompt ${NAMES[kind]} salvato.`
   redraw($)
+  focusPlay($)
 }
 
+// ↺ default: rimette nell'editor il prompt di partenza; salva lo tiene.
 function resetEditor($: EngineInterface): void {
   const kind = st.editing
   if (!kind) return
@@ -385,6 +412,26 @@ function resetEditor($: EngineInterface): void {
   st.editKey++
   st.note = 'Default reinserito: premi salva per tenerlo.'
   redraw($)
+}
+
+function closeEditor($: EngineInterface): void {
+  st.editing = undefined
+  redraw($)
+  focusPlay($)
+}
+
+// ✎ accanto al cestino: il testo catturato si modifica nel pannello; con REC
+// acceso ogni modifica ne rinnova il tempo.
+function pressEditRaw($: EngineInterface, site: string): void {
+  editSite = site
+  st.rawEditing = !st.rawEditing
+  if (st.rawEditing) st.rawSession++
+  st.note = st.rawEditing ? '' : 'Modifica chiusa.'
+  renewArm()
+  redraw($)
+  // Il cursore va subito nel campo, senza doverci cliccare: l'engine aspetta che sia disegnato.
+  if (st.rawEditing) void tryFocus($, site, `raw-${st.rawSession}`)
+  else focusPlay($)
 }
 
 // ---- il disegno ------------------------------------------------------------
@@ -396,6 +443,21 @@ const levelLabel = (kind: Kind, words: number): string => {
   }
   const l = st.level.prosa
   return l === 0 ? '×1' : l > 0 ? `×${2 ** l}` : `×1/${2 ** -l}`
+}
+
+// Uscendo da un editor il campo sparisce e il fuoco della tastiera resterebbe
+// sull'elemento vicino (✎, 🗑) come un cursore perso: lo si porta su ▶, il passo
+// dopo naturale. L'API non ha un modo per ridarlo al prompt della chat.
+let editSite = ''
+const focusPlay = ($: EngineInterface) => {
+  if (editSite) void tryFocus($, editSite, 'play')
+}
+
+// Sposta il fuoco della tastiera su un elemento. Claude Code lo concede solo nei
+// pannelli di questo mod: nel pannello di Glassbox è rifiutato ("not this
+// plugin's site") e si clicca nel campo; nel pannello di Voxbox da solo funziona.
+async function tryFocus($: EngineInterface, site: string, key: string): Promise<void> {
+  await $.ui.focus({ requestId: site, key }).catch(() => undefined)
 }
 
 const clamp = (n: number, max: number) => Math.max(0, Math.min(n, max))
@@ -603,7 +665,7 @@ export const register: Register = on => {
       st.view === t.kind && t.kind !== 'raw' ? (
         <Box key={`tab:${t.kind}`} flexDirection="row" flexShrink={0}>
           {chip(`view-${t.kind}`, t.title, true, () => pressView($, t.kind))}
-          <Button key={`edit-${t.kind}`} plain dimColor onPress={() => openEditor($, t.kind as Kind)}>
+          <Button key={`edit-${t.kind}`} plain dimColor onPress={() => openEditor($, t.kind as Kind, requestId)}>
             ✎
           </Button>
         </Box>
@@ -710,85 +772,116 @@ export const register: Register = on => {
               : { text: st.note, color: undefined }
     footer.push(row('status', <Text color={status.color} dimColor={!status.color}>{fitText(status.text || ' ', inner)}</Text>))
     const room = Math.max(3, bodyRows - out.length - footer.length)
-    // L'ultima riga del riquadro del testo porta a destra il cestino, quando c'è testo.
+    // L'ultima riga del riquadro del testo porta a destra ✎ e 🗑, quando c'è testo.
     const hasText = st.text.trim() !== '' && !st.editing
     const textRows = hasText ? room - 1 : room
+    // ✎ modifica il testo della vista aperta (in VOX e SYNTH, una volta generato);
+    // 🗑 svuota tutto, a partire da RAW.
+    const canEdit = shownText().trim() !== ''
     const trash = (
       <Box key="trash-row" flexDirection="row" height={1} overflow="hidden">
-        <Text>{' '.repeat(Math.max(0, width - 1 - cols('🗑')))}</Text>
+        <Text>{' '.repeat(Math.max(0, width - 1 - cols('🗑') - (canEdit ? cols('✎') + 1 : 0)))}</Text>
+        {canEdit && (
+          <Button
+            key="edit-raw"
+            plain
+            dimColor={!st.rawEditing}
+            onPress={() => pressEditRaw($, requestId)}
+          >
+            <Text color={st.rawEditing ? ACCENT : undefined} bold={st.rawEditing}>
+              ✎
+            </Text>
+          </Button>
+        )}
+        {canEdit && <Text> </Text>}
         <Button key="clear" plain dimColor onPress={() => pressClear($)}>
           🗑
         </Button>
       </Box>
     )
 
+    // Un campo di testo va disegnato senza un contenitore che ne fissi altezza o
+    // margini (lì il terminale non lo mostra): solo una riga con il rientro.
+    // Mentre si scrive, Claude Code mette accanto al campo una colonna "↵ ·
+    // \↵ new line" che l'API non permette di togliere né spostare. Dare al campo
+    // una larghezza o farlo crescere lo rompe: resta così.
+    // Invio salva ed esce: Claude Code poi svuota il campo, e quel vuoto non
+    // deve arrivare al testo, quindi le modifiche contano solo mentre si è dentro.
+    const field = (key: string, input: RenderElement) => (
+      <Box key={key} flexDirection="row">
+        <Text>{INDENT}</Text>
+        {input}
+      </Box>
+    )
     if (st.editing) {
+      // Il prompt e i suoi parametri, modificabili; salva li applica.
       const kind = st.editing
+      const head = `✎ prompt ${NAMES[kind]}`
       const hint = kind === 'prosa' ? '{parole}: dalla formula' : '{righe}, {parole_riga}: dalla formula'
-      out.push(row('edit:head', <Text color={ACCENT} bold>{`✎ prompt ${NAMES[kind]}`}</Text>, <Text dimColor>{fitText(`  ${hint}`, Math.max(1, inner - cols(`✎ prompt ${NAMES[kind]}`)))}</Text>))
+      out.push(row('edit:head', <Text color={ACCENT} bold>{head}</Text>, <Text dimColor>{fitText(`  ${hint}`, Math.max(1, inner - cols(head)))}</Text>))
       out.push(
-        <Box key="edit:text" paddingLeft={INDENT.length}>
+        field(
+          'edit:text',
           <Input
             key={`edit-template-${st.editKey}`}
+            autoFocus
             value={st.draft}
+            submitLabel="salva"
             rows={Math.max(3, room - 4)}
             onInput={value => {
-              st.draft = value
+              if (st.editing === kind) st.draft = value
             }}
             onSubmit={value => {
+              if (st.editing !== kind) return
               st.draft = value
+              void saveEditor($)
             }}
-          />
-        </Box>,
+          />,
+        ),
       )
       out.push(
-        <Box key="edit:params" paddingLeft={INDENT.length}>
+        field(
+          'edit:params',
           <Input
             key={`edit-params-${st.editKey}`}
             label="parametri"
             value={st.draftParams}
             onInput={value => {
-              st.draftParams = value
+              if (st.editing === kind) st.draftParams = value
             }}
             onSubmit={value => {
+              if (st.editing !== kind) return
               st.draftParams = value
               void saveEditor($)
             }}
-          />
-        </Box>,
+          />,
+        ),
       )
       out.push(
         ...flow('edit:buttons', [
-          button('edit-save', 'salva', () => void saveEditor($)),
+          button('edit-save', 'salva', () => void saveEditor($), ACCENT, true),
           button('edit-reset', '↺ default', () => resetEditor($)),
-          button('edit-cancel', 'annulla', () => {
-            st.editing = undefined
-            redraw($)
-          }),
+          button('edit-close', 'chiudi', () => closeEditor($)),
         ]),
       )
-    } else if (st.view === 'raw' && st.text.trim() !== '') {
-      // RAW si modifica: punti, virgole, a capo, tagli, aggiunte. In concatena le
-      // copie nuove arrivano in fondo, e ogni modifica tiene acceso REC.
+    } else if (st.rawEditing && shownText().trim() !== '') {
+      // Il testo della vista in modifica (✎): punti, virgole, tagli, aggiunte. In
+      // concatena le copie nuove arrivano in fondo anche adesso, e ogni modifica
+      // tiene acceso REC.
       const edit = (value: string) => {
-        st.text = value
-        st.version++
+        if (!st.rawEditing || value.trim() === '') return
+        setShownText(value)
         renewArm()
       }
-      out.push(
-        <Box key={`raw:${st.textKey}`} paddingLeft={INDENT.length} width={width - 1} height={textRows} overflow="hidden">
-          <Input
-            key="raw"
-            value={st.text}
-            rows={Math.max(2, textRows - 2)}
-            onInput={edit}
-            onSubmit={value => {
-              edit(value)
-              redraw($)
-            }}
-          />
-        </Box>,
-      )
+      // Invio salva ed esce; un Invio a campo vuoto esce senza cancellare (per svuotare c'è 🗑).
+      const done = (value: string) => {
+        if (value.trim() !== '') edit(value)
+        st.rawEditing = false
+        st.note = value.trim() !== '' ? `Testo salvato: ${countWords(shownText())} parole.` : 'Uscito senza modifiche.'
+        redraw($)
+        focusPlay($)
+      }
+      out.push(field(`raw:${st.textKey}`, <Input key={`raw-${st.rawSession}`} autoFocus value={shownText()} rows={Math.max(2, textRows)} submitLabel="salva" onInput={edit} onSubmit={done} />))
     } else {
       const shown = shownText()
       const isEmpty = sourceText().trim() === ''

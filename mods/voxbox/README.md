@@ -16,8 +16,8 @@ VOX e SYNTH li scrive un modello **dall'interno della sessione**, senza chiedere
   RAW | VOX | SYNTH✎
   ◂ 5 righe ▸ fast | deep
   ──────────────────────────────────────────
-  …il testo (in RAW si modifica)…
-                                               🗑
+  …il testo…
+                                             ✎ 🗑
   ──────────────────────────────────────────
   [ ▶ ] [ ■ ] − 1.0× +  ≈ 1′30″
   Haiku · 2.4 s · 238 parole
@@ -27,8 +27,8 @@ VOX e SYNTH li scrive un modello **dall'interno della sessione**, senza chiedere
 - **REC** apre la porta alle copie. Premi REC, selezioni un testo in herdr (che lo copia da solo, `copy_on_select`), e il testo arriva qui. Dopo 60 secondi senza copie e senza modifiche al testo si spegne da solo. Mentre è spento nessun processo guarda gli appunti; ripremerlo lo spegne.
 - **1 / +**, accanto a REC, è il modo: un pulsante solo che dice quello attivo e lo scambia. `1` = sostituisci, `+` = concatena (lo ricorda anche la riga sotto, a pannello vuoto).
   - sostituisci: la copia prende il posto del testo di prima, e REC si spegne. Per la prossima va ripremuto.
-  - concatena: ogni copia si aggiunge in fondo, a capo, e REC **resta acceso**. Se herdr scrive la stessa selezione due volte di fila, la seconda si ignora. Punti, virgole o frasi in mezzo li scrivi direttamente nel testo; ogni copia e ogni modifica rimettono il timer a 60 secondi.
-- **RAW è modificabile**: il testo catturato (o l'ultima risposta) si corregge, si taglia, si completa lì. VOX e SYNTH partono dal testo com'è dopo le tue modifiche.
+  - concatena: ogni copia si aggiunge in fondo, a capo, e REC **resta acceso**. Se herdr scrive la stessa selezione due volte di fila, la seconda si ignora. Punti, virgole o frasi in mezzo li scrivi nel testo con ✎; ogni copia e ogni modifica rimettono il timer a 60 secondi.
+- **✎**, accanto al cestino, rende modificabile nel pannello il testo della vista aperta: in RAW il testo catturato (o l'ultima risposta), in VOX e SYNTH il testo generato. Dopo ✎ si clicca nel testo (Claude Code non lascia a un mod spostare il cursore nel pannello di un altro), si scrive, e **Invio** salva ed esce; **\ + Invio** va a capo. RAW è il testo di partenza: cambiarlo fa riscrivere VOX e SYNTH. In concatena le copie nuove arrivano in fondo a RAW anche mentre lo modifichi, e ogni modifica tiene acceso REC.
 - **🗑**, in basso a destra nel riquadro del testo, svuota.
 - **CP**, all'estrema destra, prende il testo di Claude dopo il tuo ultimo messaggio.
 - **RAW** è il testo così com'è. **VOX** lo srotola in prosa: tabelle ed elenchi diventano un discorso spiegato. **SYNTH** lo riduce a poche righe telegrafiche. Si scrivono solo quando apri la vista, poi restano pronte finché la sorgente non cambia.
@@ -38,7 +38,7 @@ VOX e SYNTH li scrive un modello **dall'interno della sessione**, senza chiedere
 - **fast | deep**, sotto VOX e SYNTH:
   - fast: Haiku, con `$.model.complete`, vede solo il testo (e, per una selezione, la risposta da cui viene);
   - deep: un fork della sessione stessa, con `$.model.fork`, che conosce tutta la conversazione. Costa di più. ▸ oltre il livello base della Prosa passa da solo a deep (`deep (auto)`), perché approfondire senza contesto vuol dire inventare.
-- **✎**, accanto alla vista scelta (VOX o SYNTH), apre il suo prompt da modificare, con i suoi parametri (`soglia=250 tetto=4`, `gradini=60:1,200:3,500:5,1000:7,oltre:9 parole_riga=12`). **↺ default** rimette quello di partenza nell'editor e **salva** lo tiene, anche nelle sessioni dopo. `{parole}`, `{righe}` e `{parole_riga}` li riempie la formula.
+- **✎**, accanto alla vista scelta (VOX o SYNTH), apre nel pannello il suo prompt e, sotto, i suoi parametri (si clicca nel campo per scrivere; Invio salva) (`soglia=250 tetto=4`, `gradini=60:1,200:3,500:5,1000:7,oltre:9 parole_riga=12`). **salva** li applica, anche nelle sessioni dopo; **↺ default** rimette nei campi quelli di partenza (salva per tenerli); **chiudi** lascia tutto com'era. `{parole}`, `{righe}` e `{parole_riga}` li riempie la formula.
 - **▶** legge la vista aperta, **■** la ferma subito, **− +** cambiano la velocità. Accanto c'è la durata stimata.
 
 VOX e SYNTH sono sempre in italiano. Il testo letto passa prima da una pulizia: niente blocchi di codice, link, simboli markdown, caratteri grafici del terminale; i percorsi diventano il loro ultimo nome.

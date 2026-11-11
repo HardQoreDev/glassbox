@@ -106,4 +106,6 @@ describe('i prompt', () => {
     expect(r.prompt).toContain('CONTESTO:\n<<<\nla risposta intera\n>>>')
     expect(r.system).toContain('italiano')
   })
+
+
 })

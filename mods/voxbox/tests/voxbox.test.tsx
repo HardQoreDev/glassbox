@@ -25,7 +25,10 @@ const CONFIG = JSON.stringify({ python: '/v/python', voice: '/v/serena.onnx', wi
 const REPLY = 'Ho controllato herdr: il tasto prefix più esse è già occupato. Ti propongo prefix più shift più esse.'
 
 // Quello che sta sotto il mod: ogni hook fa le veci dell'engine.
-function fakeEngine(on: On, calls: { complete: string[]; fork: string[] }) {
+type Calls = { complete: string[]; fork: string[]; run: string[][]; written: Record<string, string> }
+const calls0 = (): Calls => ({ complete: [], fork: [], run: [], written: {} })
+
+function fakeEngine(on: On, calls: Calls = calls0()) {
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', () => ({ value: { command: 'voxbox' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -40,6 +43,16 @@ function fakeEngine(on: On, calls: { complete: string[]; fork: string[] }) {
     if (path.endsWith('/.claude-plugin/plugin.json')) return { value: '{"version":"0.1.0"}' } as never
     throw new Error(`ENOENT: ${path}`)
   })
+  on('process.run', (_, e) => {
+    calls.run.push([...e.argv])
+    return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
+  })
+  on('fs.write', (_, e) => {
+    calls.written[String((e as { path?: string }).path)] = String((e as { text?: string }).text)
+    return { value: undefined } as never
+  })
+  on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } }) as never)
+  on('clock.every', () => ({ value: { cancel: () => undefined } }) as never)
   on('session.messages', () => ({
     value: [
       { role: 'user', text: 'controlla herdr', toolUses: [] },
@@ -62,7 +75,7 @@ async function start($: Engine) {
 }
 
 test('il pannello: titolo, sorgente, viste e comandi', { timeoutMs: 20_000 }, async ($, on) => {
-  fakeEngine(on, { complete: [], fork: [] })
+  fakeEngine(on)
   await start($)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -75,7 +88,7 @@ test('il pannello: titolo, sorgente, viste e comandi', { timeoutMs: 20_000 }, as
 })
 
 test('in un pannello stretto (24 colonne) i comandi vanno a capo, nessuno sparisce', { timeoutMs: 20_000 }, async ($, on) => {
-  fakeEngine(on, { complete: [], fork: [] })
+  fakeEngine(on)
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 24 } })
   const missing: string[] = []
@@ -88,7 +101,7 @@ test('in un pannello stretto (24 colonne) i comandi vanno a capo, nessuno sparis
 })
 
 test('l\'ultima risposta arriva in RAW, poi SINTESI la scrive Haiku', { timeoutMs: 20_000 }, async ($, on) => {
-  const calls = { complete: [] as string[], fork: [] as string[] }
+  const calls = calls0()
   fakeEngine(on, calls)
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -96,8 +109,15 @@ test('l\'ultima risposta arriva in RAW, poi SINTESI la scrive Haiku', { timeoutM
   await ui.press({ key: 'reply' })
   await ui.redraw()
   expect(await ui.find({ type: 'Text', text: /ultima risposta · 18 parole/ })).toBeDefined()
-  // RAW è un campo modificabile con la risposta dentro.
-  expect(await ui.find({ key: 'raw' })).toBeDefined()
+  // RAW si legge; ✎ accanto al cestino lo rende modificabile nel pannello, di nuovo ✎ torna a leggere.
+  expect(await ui.find({ type: 'Text', text: /Ho controllato herdr/ })).toBeDefined()
+  expect(await ui.find({ key: 'raw-1' })).toBeUndefined()
+  await ui.press({ key: 'edit-raw' })
+  await ui.redraw()
+  expect(await ui.find({ key: 'raw-1' })).toBeDefined()
+  await ui.press({ key: 'edit-raw' })
+  await ui.redraw()
+  expect(await ui.find({ key: 'raw-1' })).toBeUndefined()
 
   await ui.press({ key: 'view-sintesi' })
   await ui.redraw()
@@ -119,8 +139,8 @@ test('l\'ultima risposta arriva in RAW, poi SINTESI la scrive Haiku', { timeoutM
   await ui.unmount()
 })
 
-test('l\'editor dei prompt: modifica, salva, ↺ default', { timeoutMs: 20_000 }, async ($, on) => {
-  fakeEngine(on, { complete: [], fork: [] })
+test('l\'editor dei prompt nel pannello: ↺ default lo rimette, salva lo tiene', { timeoutMs: 20_000 }, async ($, on) => {
+  fakeEngine(on)
   const stored: unknown[] = []
   on('store.set', (_, e) => {
     stored.push(e.value)
@@ -133,18 +153,20 @@ test('l\'editor dei prompt: modifica, salva, ↺ default', { timeoutMs: 20_000 }
   await ui.press({ key: 'edit-sintesi' })
   await ui.redraw()
   expect(await ui.find({ type: 'Text', text: /✎ prompt SYNTH/ })).toBeDefined()
+  expect(await ui.find({ key: 'edit-template-1' })).toBeDefined()
+  expect(await ui.find({ key: 'edit-params-1' })).toBeDefined()
   await ui.press({ key: 'edit-reset' })
   await ui.redraw()
   expect(await ui.find({ type: 'Text', text: /Default reinserito/ })).toBeDefined()
   await ui.press({ key: 'edit-save' })
   await ui.redraw()
   expect(stored.length).toBe(1)
-  expect(await ui.find({ type: 'Text', text: /Prompt salvato\./ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Prompt SYNTH salvato\./ })).toBeDefined()
   await ui.unmount()
 })
 
 test('solidità: da 14 a 90 colonne nessuna riga esce dal pannello', { timeoutMs: 60_000 }, async ($, on) => {
-  fakeEngine(on, { complete: [], fork: [] })
+  fakeEngine(on)
   await start($)
   const cols = (text: string) => Array.from(text).reduce((n, ch) => n + (/\p{Extended_Pictographic}/u.test(ch) ? 2 : 1), 0)
   const rows = ['title:0', 'title:1', 'title:gap', 'summary', 'trash-row']
@@ -170,7 +192,7 @@ test('solidità: da 14 a 90 colonne nessuna riga esce dal pannello', { timeoutMs
 })
 
 test('REC e il suo modo: 1 = sostituisci, + = concatena; CP a destra', { timeoutMs: 20_000 }, async ($, on) => {
-  fakeEngine(on, { complete: [], fork: [] })
+  fakeEngine(on)
   await start($)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ key: 'mode' }))?.text).toContain('1')
@@ -185,7 +207,7 @@ test('REC e il suo modo: 1 = sostituisci, + = concatena; CP a destra', { timeout
 })
 
 test('le viste: RAW | PROSA | SINTESI, in colonna se non ci stanno; sotto i comandi della scelta', { timeoutMs: 20_000 }, async ($, on) => {
-  fakeEngine(on, { complete: [], fork: [] })
+  fakeEngine(on)
   await start($)
   const wide = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 70 } })
   expect((await wide.find({ key: 'views:0' }))?.text).toContain('RAW | VOX | SYNTH')
@@ -201,4 +223,53 @@ test('le viste: RAW | PROSA | SINTESI, in colonna se non ci stanno; sotto i coma
   const narrow = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 20 } })
   for (const key of ['views:0', 'views:1', 'views:2']) expect(await narrow.find({ key })).toBeDefined()
   await narrow.unmount()
+})
+
+test('RAW in modifica: Invio salva ed esce; la seconda volta il campo è nuovo, e un Invio vuoto non cancella', { timeoutMs: 20_000 }, async ($, on) => {
+  fakeEngine(on)
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'reply' })
+  await ui.redraw()
+  // Prima volta: scrivo e Invio.
+  await ui.press({ key: 'edit-raw' })
+  await ui.redraw()
+  const first = (await ui.find({ type: 'Input' }))?.key ?? ''
+  await ui.input({ key: first, text: 'Testo corretto da me.', kind: 'change' })
+  await ui.input({ key: first, text: 'Testo corretto da me.', kind: 'submit' })
+  await ui.redraw()
+  expect(await ui.find({ type: 'Input' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Testo corretto da me\./ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Testo salvato: 4 parole/ })).toBeDefined()
+  // Seconda volta: un campo con un altro nome, e un Invio a campo vuoto esce senza cancellare.
+  await ui.press({ key: 'edit-raw' })
+  await ui.redraw()
+  const second = (await ui.find({ type: 'Input' }))?.key ?? ''
+  expect(second).not.toBe(first)
+  await ui.input({ key: second, text: '', kind: 'submit' })
+  await ui.redraw()
+  expect(await ui.find({ type: 'Text', text: /Testo corretto da me\./ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Uscito senza modifiche/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('✎ anche in SYNTH: modifica il testo generato, RAW resta il master', { timeoutMs: 20_000 }, async ($, on) => {
+  fakeEngine(on)
+  await start($)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'reply' })
+  await ui.redraw()
+  await ui.press({ key: 'view-sintesi' })
+  await ui.redraw()
+  await ui.press({ key: 'edit-raw' })
+  await ui.redraw()
+  const field = (await ui.find({ type: 'Input' }))?.key ?? ''
+  await ui.input({ key: field, text: 'Tasto occupato: uso shift.', kind: 'submit' })
+  await ui.redraw()
+  expect(await ui.find({ type: 'Text', text: /Tasto occupato: uso shift\./ })).toBeDefined()
+  // RAW non è cambiato.
+  await ui.press({ key: 'view-raw' })
+  await ui.redraw()
+  expect(await ui.find({ type: 'Text', text: /Ho controllato herdr/ })).toBeDefined()
+  await ui.unmount()
 })
