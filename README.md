@@ -82,7 +82,7 @@ claude plugin install copia-risposta --marketplace HardQoreDev/glassbox
 claude plugin install voxbox --marketplace HardQoreDev/glassbox
 ```
 
-Voxbox vuole anche la sua voce, una volta sola: `mods/voxbox/bin/setup.sh` da un clone della repo.
+Voxbox vuole anche la sua voce, una volta sola: `mods/voxbox/bin/setup.sh` da un clone della repo. Finché Voxbox non è su `main` il marketplace non lo vede: come provarlo dal branch `feat/voxbox`, e come tenerlo in ogni sessione, è in [Provare Voxbox dal branch](mods/voxbox/README.md#provare-voxbox-dal-branch).
 
 Poi apri una nuova sessione. Per gli aggiornamenti: `claude plugin update glassbox` (e lo stesso per `copia-risposta`), poi `/reload-plugins`.
 

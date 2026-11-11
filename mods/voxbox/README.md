@@ -55,7 +55,13 @@ Per ora Voxbox richiede **WSL su Windows**.
 
 ## Installazione
 
-Serve [uv](https://docs.astral.sh/uv/), un solo binario in `~/.local/bin`. Dalla cartella della repo:
+Serve [uv](https://docs.astral.sh/uv/), un solo binario in `~/.local/bin`. Se manca:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Poi, dalla cartella della repo:
 
 ```bash
 mods/voxbox/bin/setup.sh
@@ -73,3 +79,46 @@ Lo script si può rilanciare, e rifà solo quello che manca:
 Un'altra voce di Piper: `VOXBOX_VOICE=it_IT-paola-medium mods/voxbox/bin/setup.sh`.
 
 Per disinstallare: `mods/voxbox/bin/setup.sh --uninstall`. I prompt modificati stanno nello store del plugin.
+
+## Provare Voxbox dal branch
+
+Finché Voxbox non arriva su `main`, il marketplace non lo vede (legge da `main`): lo si carica da un clone della repo, sul branch `feat/voxbox`. Il Glassbox che lo affianca è quello dello stesso branch, perché lo scambio tra i due pannelli vuole le sue poche righe in più; quello installato dal marketplace va spento, se no se ne caricano due.
+
+### Una volta, su ogni macchina
+
+```bash
+# uv, se manca
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# la repo è privata: serve la chiave SSH su GitHub (o `gh auth login`)
+git clone git@github.com:HardQoreDev/glassbox.git ~/projects/glassbox
+cd ~/projects/glassbox && git switch feat/voxbox
+
+# la voce: circa 250 MB, niente sudo
+mods/voxbox/bin/setup.sh
+```
+
+### Una sessione di prova
+
+Dalla cartella della repo; il Glassbox del marketplace resta spento solo per questa sessione:
+
+```bash
+claude --settings '{"enabledPlugins":{"glassbox@glassbox":false}}' --plugin-dir mods/glassbox --plugin-dir mods/voxbox
+```
+
+Il pannello sta a destra nel layout a schermo intero (`/tui fullscreen`). REC legge gli appunti di Windows: serve un terminale che copi la selezione, come herdr (`copy_on_select`).
+
+### Tenerlo sempre
+
+Per averlo in ogni sessione senza il comando qui sopra, in `~/.claude/settings.json` si spegne il Glassbox del marketplace e si mettono le due cartelle in `CLAUDE_CODE_PLUGIN_DIRS`, **separate dai due punti**. Lanciato nel prompt di una sessione con `!` davanti, questo comando fa una copia di sicurezza e cambia solo quelle due cose:
+
+```bash
+cp ~/.claude/settings.json ~/.claude/settings.json.bak-voxbox && python3 -c "import json;p='$HOME/.claude/settings.json';d=json.load(open(p));d.setdefault('env',{})['CLAUDE_CODE_PLUGIN_DIRS']='$HOME/projects/glassbox/mods/glassbox:$HOME/projects/glassbox/mods/voxbox';d.setdefault('enabledPlugins',{})['glassbox@glassbox']=False;json.dump(d,open(p,'w'),indent=2,ensure_ascii=False)"
+```
+
+Poi una nuova sessione. Da sapere:
+
+- i mod si leggono dal clone, cioè dal branch attivo in `~/projects/glassbox`: passando a `main` Voxbox sparisce finché non si torna su `feat/voxbox`;
+- un `git pull` sul branch porta gli aggiornamenti, che la sessione ricarica da sola;
+- per tornare indietro: `cp ~/.claude/settings.json.bak-voxbox ~/.claude/settings.json`;
+- quando Voxbox sarà su `main` si installa dal marketplace come gli altri, e `CLAUDE_CODE_PLUGIN_DIRS` va tolta.
