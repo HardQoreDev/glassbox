@@ -66,6 +66,7 @@ export default function (pi: any) {
       const meta = JSON.parse(readFileSync(join(record, 'session.json'), 'utf8'))
       check('due richieste registrate', meta.requests === 2, meta.requests)
       check('riprende con pi', meta.resume === `pi --session ${id}`, meta.resume)
+      check('la versione è quella del pacchetto pi', meta.glassbox === JSON.parse(readFileSync(join(import.meta.dirname, '..', '..', 'package.json'), 'utf8')).version, meta.glassbox)
       const second = JSON.parse(readFileSync(join(record, 'requests', '0002.json'), 'utf8'))
       const text = JSON.stringify(second)
       check('la seconda richiesta porta la chiamata e la risposta dello strumento', text.includes('tool_use') && text.includes('tool_result') && text.includes('"Write"'), Object.keys(second))

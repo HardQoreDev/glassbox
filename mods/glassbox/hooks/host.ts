@@ -9,4 +9,6 @@ export const host = {
   hidden: [] as string[],
   /** Il modello piccolo che scrive prosa e sintesi in fast, come lo chiama il pannello. */
   fast: 'Haiku',
+  /** La versione da mostrare nel titolo; senza, quella del plugin di Claude Code. In pi è quella del pacchetto. */
+  version: undefined as string | undefined,
 }

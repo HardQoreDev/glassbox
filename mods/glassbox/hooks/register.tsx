@@ -222,10 +222,12 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await startTurns($)
-    version = await $.fs
-      .read(`${$.plugin.root}/.claude-plugin/plugin.json`)
-      .then(text => String((JSON.parse(text) as { version?: unknown }).version ?? ''))
-      .catch(() => '')
+    version =
+      host.version ??
+      (await $.fs
+        .read(`${$.plugin.root}/.claude-plugin/plugin.json`)
+        .then(text => String((JSON.parse(text) as { version?: unknown }).version ?? ''))
+        .catch(() => ''))
     setRecordVersion(version)
     // VOX e SYNTH: i prompt salvati e dov'è la voce.
     await startVox($, section => {

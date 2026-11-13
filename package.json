@@ -1,6 +1,6 @@
 {
   "name": "glassbox",
-  "version": "0.18.0",
+  "version": "0.1.0",
   "description": "Glassbox for pi: a panel on the right with the git branches, the files changed in the session, what goes into the context of every request, the open sessions, and VOX and SYNTH to read, shorten and hear a reply",
   "license": "MIT",
   "private": true,

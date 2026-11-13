@@ -6,7 +6,7 @@
 //
 // Il codice di Glassbox arriva da pi/dist/hooks, compilato da pi/build.sh: pi
 // non carica JSX.
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -284,6 +284,12 @@ export default function glassbox(pi: any) {
     const sm = ctx.sessionManager
     host.resume = (id: string) => `pi --session ${id}`
     host.hidden = ['hooks']
+    // La versione di Glassbox in pi è quella del pacchetto (package.json), non quella del mod di Claude Code.
+    try {
+      host.version = String(JSON.parse(readFileSync(join(root, '..', '..', 'package.json'), 'utf8')).version ?? '')
+    } catch {
+      host.version = undefined
+    }
     const fast = fastModel()
     host.fast = fast ? (/haiku/i.test(fast.id) ? 'Haiku' : String(fast.name ?? fast.id)) : 'The model'
     engine = createEngine({

@@ -80,6 +80,8 @@ Cosa cambia rispetto a Claude Code:
 - **VOX e SYNTH** in `fast` usano un Haiku se pi ne ha uno con le credenziali, altrimenti il modello della sessione; `deep` rimanda il contesto dell'ultima richiesta con la domanda in più, senza scrivere nella sessione.
 - Il registro delle sessioni va in `~/.pi/agent/glassbox/sessions/`; `GLASSBOX_RECORD=0` lo spegne. I prompt di VOX e SYNTH stanno in `~/.pi/agent/glassbox/store.json`.
 
+La versione di Glassbox in pi è quella di [`package.json`](package.json) e ha una numerazione sua, separata da quella del mod per Claude Code (`mods/glassbox/.claude-plugin/plugin.json`): è quella che il pannello mostra in pi.
+
 pi non carica JSX, quindi il codice di Glassbox è compilato in `pi/dist/`, che sta in git: dopo una modifica a `mods/glassbox/hooks` va rifatta con `pi/build.sh` e committata (`pi/test.sh` fallisce se è rimasta indietro).
 
 ### copia-risposta
