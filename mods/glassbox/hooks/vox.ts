@@ -68,8 +68,10 @@ let setup: Setup | undefined
 let root = ''
 // Apre la sezione quando un suo comando si usa da chiusa.
 let reveal: (section: VoxSection) => void = () => undefined
-let sessions = 0
-let keys = 0
+// I campi dell'editor hanno ogni volta un nome nuovo: Claude Code ricorda per
+// nome un campo svuotato dall'Invio, anche dopo che il mod si è ricaricato.
+let sessions = Date.now() % 1_000_000
+let keys = sessions
 
 export const promptsNow = (): Prompts => prompts
 
@@ -273,9 +275,7 @@ async function generate($: EngineInterface, kind: Kind): Promise<void> {
   try {
     let reply: { isAnswered: true; text: string } | { isAnswered: false; reason: string }
     if (deep) {
-      // `effort` manca nei tipi di qualche versione di Claude Code: lì si ignora.
-      const request = { prompt: forkPrompt(kind, prompts, values, text, isSelection), effort: 'low' }
-      reply = await $.model.fork(request)
+      reply = await $.model.fork({ prompt: forkPrompt(kind, prompts, values, text, isSelection), effort: 'low' })
     } else {
       const context = isSelection ? lastReply(await $.session.messages()) : ''
       const request = quickRequest(kind, prompts, values, text, context && context !== text ? context : undefined)
@@ -376,6 +376,15 @@ function focus($: EngineInterface, key: string): void {
   void $.ui.focus({ requestId: PANE, key }).catch(() => undefined)
 }
 
+// Apre un campo dell'editor con il cursore dentro. Il pannello deve avere la
+// tastiera perché il fuoco si sposti: la si chiede riaprendolo con `focus`, che
+// Claude Code concede solo se nel prompt non c'è scritto niente. Se la nega,
+// si clicca nel campo.
+async function focusField($: EngineInterface, key: string): Promise<void> {
+  await $.ui.open({ id: PANE, title: 'Glassbox', columns: 64, backgroundColor: 'transparent', focus: true }).catch(() => undefined)
+  await $.ui.focus({ requestId: PANE, key }).catch(() => undefined)
+}
+
 function closeEdit($: EngineInterface): void {
   const edit = vox.edit
   vox.edit = undefined
@@ -389,7 +398,7 @@ function editText($: EngineInterface, target: Target): void {
   vox.edit = { what: 'text', target, session: ++sessions }
   renewArm()
   redraw($)
-  focus($, `vox-text-${sessions}`)
+  void focusField($, `vox-text-${sessions}`)
 }
 
 // Il testo catturato è il master: cambiarlo fa riscrivere prosa e sintesi;
@@ -421,7 +430,7 @@ function submitText($: EngineInterface, target: Target, value: string): void {
 function editPrompt($: EngineInterface, kind: Kind): void {
   vox.edit = { what: 'prompt', kind, draft: prompts[kind].template, params: paramsText(kind, prompts), key: ++keys }
   redraw($)
-  focus($, `vox-prompt-${keys}`)
+  void focusField($, `vox-prompt-${keys}`)
 }
 
 async function savePrompt($: EngineInterface): Promise<void> {
