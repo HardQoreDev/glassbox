@@ -1,4 +1,5 @@
-// Il motore finto sotto il mod, condiviso dai test: un repo in /r con le sue
+// Il motore finto sotto il mod, condiviso dai test: un pannello con le cinque
+// sezioni aperte e VOX e SYNTH chiuse, un repo in /r con le sue
 // cartelle e i suoi branch, due hook nelle impostazioni utente (uno con
 // hook-switch), due plugin con i loro hook, un modello che risponde.
 import type { Engine } from 'claude-code/testing'
@@ -213,6 +214,12 @@ export const FORK: { reply: ModelForkResult; prompts: string[] } = {
   prompts: [],
 }
 
+// Per VOX e SYNTH: la conversazione come la legge `cp`, quello che Haiku
+// risponde con i prompt che ha ricevuto, e lo store del plugin.
+export const CHAT: { role: 'user' | 'assistant'; text: string; toolUses: never[] }[] = []
+export const COMPLETE: { text: string; prompts: string[] } = { text: 'Fatto.', prompts: [] }
+export const STORE: Record<string, unknown> = {}
+
 /** Lascia finire il lavoro che il mod fa fuori dal giro degli strumenti. */
 export async function settle(): Promise<void> {
   for (let i = 0; i < 100; i++) await Promise.resolve()
@@ -227,7 +234,17 @@ export function fakeEngine(on: On, opened: string[] = []) {
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.root', () => ({ value: '/r' }))
   on('session.cwd', () => ({ value: '/r' }))
-  on('session.messages', (_, e) => ({ value: (e as { as?: string }).as === 'api' ? [...MESSAGES] : [] }) as never)
+  on('session.messages', (_, e) => ({ value: (e as { as?: string }).as === 'api' ? [...MESSAGES] : [...CHAT] }) as never)
+  on('model.complete', (_, e) => {
+    COMPLETE.prompts.push(String(e.prompt))
+    return { value: { isAnswered: true, text: COMPLETE.text, usage: {} } } as never
+  })
+  on('store.get', (_, e) => ({ value: STORE[String((e as { key?: string }).key)] }) as never)
+  on('store.set', (_, e) => {
+    const { key, value } = e as unknown as { key: string; value: unknown }
+    STORE[key] = value
+    return { value: undefined } as never
+  })
   on('session.usage', (_, e) => {
     const breakdown = (e as { breakdown?: string }).breakdown && BREAKDOWN.value ? { breakdown: BREAKDOWN.value } : {}
     return { value: { startedAt: 0, context: { window: 200_000, ...breakdown }, rateLimits: [] } } as never

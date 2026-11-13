@@ -1,7 +1,7 @@
-// ARMA: apre la porta alle copie. `voxbox-win.exe clips` resta in ascolto
+// REC: apre la porta alle copie. `voxbox-win.exe clips` resta in ascolto
 // degli appunti di Windows (quello che c'era prima non conta) e consegna ogni
 // copia nuova, seguita da un byte NUL, finché non lo si chiude. Quando
-// chiuderlo lo decide register.tsx: dopo la prima copia in modo sostituisci,
+// chiuderlo lo decide vox.ts: dopo la prima copia in modo sostituisci,
 // dopo 60 secondi senza copie né ritocchi al separatore in modo concatena.
 // Mentre non si è armati non c'è nessun processo che guarda gli appunti.
 import type { EngineInterface, HookStream, ProcessSpawnChunk, ProcessSpawnResult } from 'claude-code'

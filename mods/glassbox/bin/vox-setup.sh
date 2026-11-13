@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prepara la voce di Voxbox (WSL su Windows). Si può rilanciare: rifà solo
+# Prepara la voce di VOX e SYNTH, le sezioni di Glassbox che leggono ad alta voce (WSL su Windows). Si può rilanciare: rifà solo
 # quello che manca. Niente sudo.
 #
 #   ~/.local/share/voxbox/venv          Piper (piper-tts) in un ambiente suo, con uv
@@ -8,7 +8,7 @@
 #                                         con il csc.exe del .NET Framework
 #   ~/.local/share/voxbox/config.json   dove sono le tre cose, per il mod
 #
-# Disinstallare: bin/setup.sh --uninstall
+# Disinstallare: bin/vox-setup.sh --uninstall
 set -eu
 
 VOICE="${VOXBOX_VOICE:-it_IT-serena-high}"
@@ -20,7 +20,7 @@ say() { printf '%s\n' "voxbox: $*"; }
 fail() { printf '%s\n' "voxbox: $*" >&2; exit 1; }
 
 win_dir() {
-  command -v powershell.exe >/dev/null || fail "powershell.exe non trovato: Voxbox richiede WSL su Windows"
+  command -v powershell.exe >/dev/null || fail "powershell.exe non trovato: la voce di Glassbox richiede WSL su Windows"
   local_app=$(powershell.exe -NoProfile -Command '[Environment]::GetFolderPath("LocalApplicationData")' | tr -d '\r')
   wslpath -u "$local_app\\voxbox"
 }

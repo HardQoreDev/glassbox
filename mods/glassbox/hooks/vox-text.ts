@@ -1,4 +1,4 @@
-// Il testo di Voxbox, senza engine: da dove viene (l'ultima risposta), come si
+// Il testo di VOX e SYNTH, senza engine: da dove viene (l'ultima risposta), come si
 // pulisce per la voce, quanto si conta e quanto devono essere lunghe Prosa e
 // Sintesi. Tutto puro, così i test lo provano da solo.
 import type { SessionMessage } from 'claude-code'

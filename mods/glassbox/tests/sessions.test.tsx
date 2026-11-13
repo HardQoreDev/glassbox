@@ -144,13 +144,13 @@ describe('la sezione SESSIONS', () => {
     await start($)
     await settle()
     // Un pannello basso, con solo SESSIONS aperta: quattro righe per cinque sessioni.
-    const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, scroll: { offset: 0, bodyRows: 10 } } })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, scroll: { offset: 0, bodyRows: 12 } } })
     for (const id of ['hooks', 'graph', 'files', 'turns']) await ui.press({ key: `section:${id}` })
     await ui.redraw()
     expect(await ui.find({ key: 'session:busy1' })).toBeDefined()
     expect(await ui.find({ key: 'session:cold2' })).toBeUndefined()
 
-    await $.ui.scroll({ component: 'Pane', requestId: 'glassbox', offset: 0, by: 1, bodyRows: 10, contentRows: 10, origin: { kind: 'person' } })
+    await $.ui.scroll({ component: 'Pane', requestId: 'glassbox', offset: 0, by: 1, bodyRows: 12, contentRows: 12, origin: { kind: 'person' } })
     await ui.redraw()
     // Scorre il resto: busy1 esce, cold2 entra; questa resta lì.
     expect(await ui.find({ key: 'session:s1' })).toBeDefined()

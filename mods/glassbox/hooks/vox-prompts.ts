@@ -2,8 +2,8 @@
 // riempiono, e la richiesta che ne esce per Haiku (veloce) o per il fork della
 // sessione (profonda). Il testo e i parametri si cambiano dal pannello (✎) e
 // tornano qui con ↺.
-import { fill, parseSteps, prosaWords, sintesiLines } from './text'
-import type { ProsaParams, SintesiParams } from './text'
+import { fill, parseSteps, prosaWords, sintesiLines } from './vox-text'
+import type { ProsaParams, SintesiParams } from './vox-text'
 
 export type Kind = 'prosa' | 'sintesi'
 
@@ -42,14 +42,14 @@ export const DEFAULTS: Prompts = {
 
 // Quello che vale sempre, fuori dall'editor.
 export const SYSTEM =
-  'Sei Voxbox: riscrivi testi per leggerli sullo schermo e ascoltarli. Scrivi sempre in italiano, anche se il testo è in un\'altra lingua. Rispondi solo con il testo richiesto: niente premesse, niente markdown.'
+  'Sei VOX, una sezione di Glassbox: riscrivi testi per leggerli sullo schermo e ascoltarli. Scrivi sempre in italiano, anche se il testo è in un\'altra lingua. Rispondi solo con il testo richiesto: niente premesse, niente markdown.'
 
 const SELECTION_NOTE =
   'Il testo è un frammento selezionato da una risposta più lunga, riportata sotto come CONTESTO. Usa il contesto solo per capire il frammento: riscrivi solo il frammento.'
 
 const FORK_NOTE = (isSelection: boolean) =>
   [
-    '[Voxbox] Richiesta a parte, non della persona alla conversazione: non usare strumenti e non proseguire il lavoro.',
+    '[Glassbox VOX] Richiesta a parte, non della persona alla conversazione: non usare strumenti e non proseguire il lavoro.',
     isSelection
       ? 'Il testo qui sotto è un frammento preso da questa conversazione: usa quello che sai della conversazione per capirlo, ma riscrivi solo il frammento.'
       : 'Il testo qui sotto è la tua ultima risposta in questa conversazione: usa quello che sai della conversazione per renderla più chiara.',

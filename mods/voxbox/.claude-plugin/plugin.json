@@ -1,9 +1,0 @@
-{
-  "name": "voxbox",
-  "version": "0.1.0",
-  "description": "Glassbox's twin pane: catch a selection or Claude's last reply, read it raw, as plain spoken prose or as a terse summary, and hear it in a local Italian voice (Piper)",
-  "author": {
-    "name": "HardQoreDev"
-  },
-  "license": "MIT"
-}

@@ -1,6 +1,6 @@
 # Glassbox
 
-Claude Code as a glass box rather than a black box. Glassbox is a pane on the right of the session that shows what is going on around the agent: the hooks that run and a switch for each, the git branches in progress, the files the session changed (and whether another open session is changing them too), request by request what goes into the context, word for word, with the numbers and tips that help keep it lean, and the sessions open on the machine with the state of their prompt cache.
+Claude Code as a glass box rather than a black box. Glassbox is a pane on the right of the session that shows what is going on around the agent: the hooks that run and a switch for each, the git branches in progress, the files the session changed (and whether another open session is changing them too), request by request what goes into the context, word for word, with the numbers and tips that help keep it lean, the sessions open on the machine with the state of their prompt cache, and a text (a selection, or Claude's last reply) to read as it is, as plain spoken prose or as a terse summary, and to hear in a local Italian voice.
 
 ```
 /plugin install glassbox --marketplace HardQoreDev/glassbox
@@ -8,15 +8,17 @@ Claude Code as a glass box rather than a black box. Glassbox is a pane on the ri
 
 The repository is private: you need access to the HardQoreDev organization on GitHub and git set up on your machine (SSH or `gh auth login`). Claude Code 2.1.287 or later.
 
-## The five sections
+## The seven sections
 
 - **HOOKS**: the session's hooks, grouped by event: the ones in your settings (user, project, local, `--settings`, your organization's) and the ones of the plugins you enabled. Each row shows a name that says what the hook does, where it comes from and an `ON` / `OFF` button that switches it off for this session only; click a name to see its command, its file and its timeout. The ones that cannot be switched off (`ALWAYS` and `MANAGED`) start hidden and counted next to the title; the `always` button shows and hides them. Hooks written with `hook-switch` can be switched off: see [Switching hooks off](#switching-hooks-off).
 - **GIT**: the **active** view (the default) is a simple map of the branches still in progress. The main branch (the one the remote's HEAD points to, else `main` or `master`) is on top, and the branches with commits it lacks hang below it, plus the current branch and any branch open in a worktree. Each row shows `+N −M` (commits ahead of and behind the main branch) and its remote state: `↑` to push and `↓` to pull, then `last sync` with how long ago it last synced (the last push or fetch that moved the remote branch, or the last fetch that saw it where it is), `local` if never pushed, `gone` if deleted on the remote, `remote` if it exists only there. Branches already merged are counted in one row that lists them when clicked. Click a branch to see its last commit and when it was made, the comparison in words, the last sync and the worktree it is open in. The **full** view is the commit graph of every branch, like the Source Control graph in VS Code: a coloured lane per branch, merges are `⊙`, the current commit is `○`, badges show the branches (`◎` for the current one, `☁` for remote ones), and a click on a commit shows its hash, author and date. The **tags** view lists the tags newest first (the latest 200), `◆` for annotated ones and `◇` for lightweight ones, the one on HEAD highlighted. Each row shows how many commits the main branch made after the tag (`N since`: what no release holds yet), `off trunk` when the tag is on a commit the main branch does not have, `local` when the remote does not have it and `moved` when the remote has it on another commit. The remote is asked with `git ls-remote` when the view opens, with `↻`, and after a `git push` Claude runs, never on a timer; it never prompts for credentials. A click on a tag shows its message, its commit, who tagged it and when, the comparison with the main branch, and the command to push it when it is missing. The title shows how many tags there are and how many are not pushed.
 - **FILES**, in three views. **changed** (the main one): the files this session has changed, most recent first, with the lines it added and removed. That includes the files a shell command changes (`sed -i`, a redirect, a script): Bash does not say what it writes, so glassbox reads `git status` and the changed files before and after each command and compares them. It misses files git ignores, a change committed in the same command, and what a command left running in the background does later. Click one to preview it in place of the sections: the whole file as it is now, with the lines added since the session first wrote it in green and the lines removed in red, opened just above the first change; the wheel scrolls it, `tree` shows the file in the tree, `✕` goes back. When a line is wider than the pane a slider shows at the bottom: `◂` and `▸` move the text half a width, a click on the bar jumps there, the wheel over it scrolls sideways (the terminal does not pass the sideways wheel or trackpad swipe on to mods). `wrap` wraps long lines instead, and stays on from one file to the next. The preview follows the file as it changes. The `↗` at the end of each row opens the file in VS Code (its `code` command); without it, in the app your system picks: in WSL the Windows one, through `explorer.exe`; elsewhere `open`, `xdg-open` or `start`. **tree**: the session's folders like in filetree, with the colour and letter of the git status, `?:N M:N D:N` counts and lines added and removed. Files Claude reads light up purple, files it writes light up orange. **guard**: the files this session wrote that another open session wrote too; the word `guard` in the title lights up red, with how many, when two sessions are changing the same file. See [Two sessions on the same file](#two-sessions-on-the-same-file).
 - **CONTEXT**: every request to the model with its input and output and a bar of the context window, like turn-inspector. See [What goes into the context](#what-goes-into-the-context).
 - **SESSIONS**: the Claude Code sessions open on this machine, this one on top, each with its context and the state of its prompt cache. See [Open sessions and the prompt cache](#open-sessions-and-the-prompt-cache).
+- **VOX**: a text to read and to listen to: a selection copied after `rec`, or Claude's last reply with `cp`. **raw** shows it as it is, **prose** unrolls it into plain spoken prose, and `▶` reads it aloud. See [VOX and SYNTH](#vox-and-synth-read-and-listen).
+- **SYNTH**: the same text cut down to a few terse lines, written when you press `write`, and read aloud with its own `▶`.
 
-Each section has its own coloured bar left of the title. Click a title to collapse that section and give its room to the others. The mouse wheel scrolls the section under the pointer.
+VOX and SYNTH start collapsed, open at the first of their commands, and are only as tall as their text: the other sections keep the rest. Each section has its own coloured bar left of the title. Click a title to collapse that section and give its room to the others. The mouse wheel scrolls the section under the pointer.
 
 ## What goes into the context
 
@@ -114,10 +116,65 @@ A session that launched its own agents (a review, a search) waits for them: its 
 
 An agent counts as working when the `meta.json` Claude Code keeps beside its transcript (`<session>/subagents/agent-<id>.meta.json`) does not say `finished` yet and it wrote something in the last two hours: an agent left unfinished by a session that was closed or restarted stops counting after that. Each refresh is marked with `bin/sessions.py --warm <session id>`, a file named after the session in a private folder of the temporary directory (`claude-glassbox-warm-<uid>/`), so that the other sessions, a status line or a hook can count it as the session's last request.
 
+## VOX and SYNTH: read and listen
+
+Two sections for the answers that are long, dense or full of tables: instead of asking Claude to "say it better" in the chat, which costs a whole new reply and stays in the context, the text is rewritten **from inside the session** and can be listened to.
+
+```
+▌ VOX  last reply · 238 words · ≈ 1′25″          rec 1 cp ▶ ✕
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  raw | prose  ◂ ×1 ▸  fast | deep  prompt  edit  − 1.0× +
+  …the text…
+▌ SYNTH  3 lines · Haiku 2.4s · ≈ 10″                  ↻ ▶
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  ◂ 3 lines ▸  fast | deep  prompt  edit
+  …the summary…
+```
+
+**Taking a text**, from the title of VOX:
+
+- `rec` opens the door to copies. Press it, select a text in herdr (which copies it on its own, `copy_on_select`), and the text lands in VOX. After 60 seconds with no copy and no edit it switches itself off; while it is off no process watches the clipboard. The title counts the seconds left.
+- `1` / `+` is the mode of `rec`, one button that shows the active one and swaps it. `1`: the copy replaces the text, and `rec` switches off. `+`: every copy is added at the bottom on a new line, and `rec` stays on; if herdr writes the same selection twice in a row, the second is ignored.
+- `cp` takes Claude's text after your last message.
+- `✕` empties the section.
+
+**Reading it**, in the row under the title, which stays in place while the text scrolls:
+
+- **raw** is the text as it is. **prose** unrolls it: tables and lists become a talk with a thread. It is written the first time you open it, then kept until the text changes.
+- `◂ ▸` set the length of the prose: as long as the original up to 250 words, beyond that every extra word counts half; `▸` doubles and goes deeper, `◂` halves, up to ×4 and ×1/4. In SYNTH they move along steps (up to 60 words 1 line, 200 → 3, 500 → 5, 1000 → 7, beyond 9), never longer than the original.
+- **fast | deep** choose who writes. fast: Haiku, with `$.model.complete`, sees only the text (and, for a selection, the reply it comes from). deep: a fork of the session itself, with `$.model.fork`, which knows the whole conversation and costs more. `▸` beyond the base length of the prose switches to deep on its own, because going deeper without the context means making things up.
+- `prompt` opens, in place of the sections, the prompt of the prose or of the summary and, below, its parameters (`soglia=250 tetto=4`, `gradini=60:1,200:3,500:5,1000:7,oltre:9 parole_riga=12`). **save** applies them, for the next sessions too; **↺ default** puts the starting ones back in the fields; **close** leaves everything as it was. `{parole}`, `{righe}` and `{parole_riga}` are filled in by the formula.
+- `edit` opens the text shown in a field, in place of the sections: Enter saves and leaves, `\` + Enter is a new line. The text of VOX is the source: changing it makes prose and summary be written again. Changing the prose or the summary touches only that text.
+
+SYNTH is written only when you press `write`; `↻` writes it again. Prose and summary are always in Italian, whatever the language of the text: the voice is Italian.
+
+**Listening**: `▶` in a title reads what that section shows, and becomes `■` while it reads; `− +` change the speed, and the title shows about how long it takes. Before it is read, the text is cleaned: no code blocks, links, markdown symbols or terminal box characters, and a path becomes its last name.
+
+### The voice
+
+`cp`, prose and SYNTH work everywhere. `▶` and `rec` need the voice: [Piper](https://github.com/OHF-Voice/piper1-gpl) with `it_IT-serena-high`, all local, so no text leaves the machine to be read. For now it needs **WSL on Windows**: the audio comes out on the Windows side through `voxbox-win.exe`, a player of a few lines that also listens to the clipboard for `rec`, built with the `csc.exe` of the .NET Framework every Windows already has. The engine ([`bin/voxbox-tts.py`](bin/voxbox-tts.py)) starts at the first reading and stays loaded; after 10 minutes without readings it quits. The first piece of each reading is short, up to the first comma, so the voice starts in about a second.
+
+It is installed once, with [uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/install.sh | sh` if it is missing) and no sudo:
+
+```bash
+bin/vox-setup.sh
+```
+
+Until then VOX says so, with the path of the script in the installed copy of the plugin. The script can be run again and redoes only what is missing:
+
+| What | Where |
+|---|---|
+| Piper | `~/.local/share/voxbox/venv` |
+| the voice (about 114 MB) | `~/.local/share/voxbox/voices` |
+| `voxbox-win.exe` | `%LOCALAPPDATA%\voxbox` |
+| the paths for the mod | `~/.local/share/voxbox/config.json` |
+
+Another Piper voice: `VOXBOX_VOICE=it_IT-paola-medium bin/vox-setup.sh`. To uninstall: `bin/vox-setup.sh --uninstall`. The edited prompts live in the plugin's store.
+
 ## Commands
 
 - `/glassbox` opens the pane, and says where the session is recorded.
-- `/glassbox close` closes it.
+- `/glassbox close` closes it, stops `rec` and shuts the voice engine down.
 
 In the terminal Glassbox docks on the right in the fullscreen layout (`/tui fullscreen`) with at least 110 columns; otherwise it shows above the prompt.
 

@@ -1,4 +1,4 @@
-// Glassbox: una barra a destra divisa in cinque: HOOKS, gli hook della sessione da
+// Glassbox: una barra a destra divisa in sette: HOOKS, gli hook della sessione da
 // spegnere e riaccendere; GIT, i branch attivi appesi al principale (o il
 // grafo dei commit come in VS Code); FILES, quelli modificati nella sessione
 // (o l'albero come in filetree, o GUARD: quelli che sta cambiando anche
@@ -6,7 +6,10 @@
 // turni come in turn-inspector, con quello che entra nel contesto a un clic e
 // la tendina delle statistiche;
 // SESSIONS, le sessioni aperte sulla macchina con la loro cache calda o da
-// ricaricare, e un avviso prima che scada una cache pesante.
+// ricaricare, e un avviso prima che scada una cache pesante; VOX, un testo
+// (una selezione o l'ultima risposta) da leggere e da ascoltare ad alta voce;
+// SYNTH, lo stesso testo ridotto a poche righe. VOX e SYNTH partono chiuse, e
+// sono alte quanto il loro testo.
 // Ogni sezione ha la sua barretta colorata, si chiude dal titolo e scorre con
 // la rotella sotto il puntatore; le altre si prendono lo spazio.
 import type { EngineInterface, Register, RenderElement, ToolCallInput } from 'claude-code'
@@ -43,10 +46,12 @@ import { previewLayout, previewLines } from './view-preview'
 import { SESSIONS_COLOR, sessionLines, sessionsInfo, sessionsPinned } from './view-sessions'
 import { tagLines, tagView, tagsInfo } from './view-tags'
 import { titleLines } from './view-title'
-import { twin } from './twin'
-import type { Glassbox, GlassboxTurn } from '../types'
 import type { PreviewLayout } from './view-preview'
 import { INPUT_RAIL, turnLines, turnsInfo } from './view-turns'
+import { startVox, stopVox, vox, voxActions } from './vox'
+import { SYNTH_COLOR, synthInfo, synthLines, synthPinned, synthTools } from './view-synth'
+import { VOX_COLOR, voxInfo, voxLines, voxPinned, voxTools } from './view-vox'
+import { voxEditLines } from './view-vox-edit'
 
 const PANE = 'glassbox'
 const TITLE = 'Glassbox'
@@ -68,7 +73,7 @@ const FILES_COLOR = '#f0b429'
 // Sotto queste righe il titolo lascia il posto alle sezioni.
 const TITLE_MIN_ROWS = 20
 
-type SectionId = 'hooks' | 'graph' | 'files' | 'turns' | 'sessions'
+type SectionId = 'hooks' | 'graph' | 'files' | 'turns' | 'sessions' | 'vox' | 'synth'
 // Ogni sezione ha il suo colore: la barretta, il titolo, la riga sotto, lo scorrimento.
 const SECTIONS: { id: SectionId; title: string; color: string }[] = [
   { id: 'hooks', title: 'HOOKS', color: '#4ade80' },
@@ -76,15 +81,21 @@ const SECTIONS: { id: SectionId; title: string; color: string }[] = [
   { id: 'files', title: 'FILES', color: FILES_COLOR },
   { id: 'turns', title: 'CONTEXT', color: INPUT_RAIL },
   { id: 'sessions', title: 'SESSIONS', color: SESSIONS_COLOR },
+  { id: 'vox', title: 'VOX', color: VOX_COLOR },
+  { id: 'synth', title: 'SYNTH', color: SYNTH_COLOR },
 ]
+// VOX e SYNTH prendono solo le righe del loro testo, fino alla loro parte; il
+// resto va alle altre sezioni.
+const COMPACT = new Set<SectionId>(['vox', 'synth'])
 
 type Seg = { text: string; color?: string; dim?: boolean; bold?: boolean }
 // `color` accende lo strumento anche quando non è scelto: la guardia che ha trovato qualcosa.
 type Tool = { key: string; label: string; dim?: boolean; active?: boolean; color?: string; press: () => void }
 
-// Quali sezioni sono aperte, e da che riga parte ciascuna.
-const isOpen: Record<SectionId, boolean> = { hooks: true, graph: true, files: true, turns: true, sessions: true }
-const offset: Record<SectionId, number> = { hooks: 0, graph: 0, files: 0, turns: 0, sessions: 0 }
+// Quali sezioni sono aperte, e da che riga parte ciascuna. VOX e SYNTH si
+// aprono dal titolo, o da sole al primo dei loro comandi.
+const isOpen: Record<SectionId, boolean> = { hooks: true, graph: true, files: true, turns: true, sessions: true, vox: false, synth: false }
+const offset: Record<SectionId, number> = { hooks: 0, graph: 0, files: 0, turns: 0, sessions: 0, vox: 0, synth: 0 }
 // Le righe del corpo che ogni sezione occupava all'ultimo disegno: la rotella
 // scorre quella sotto il puntatore.
 let spans: { id: SectionId; from: number; to: number; max: number }[] = []
@@ -204,29 +215,6 @@ export const register: Register = (on, options) => {
   configureRecord(options)
   registerTurns(on)
 
-  // Il pannello condiviso con Voxbox (hooks/twin.ts).
-  on('engine.create', async (_$, e, next) => {
-    if (e.plugins.includes('voxbox')) twin.hasVoxbox = true
-    const built = await next(e)
-    const setTurn = async (turn: GlassboxTurn) => {
-      twin.turn = turn
-      built.ui.invalidate('ui.render')
-    }
-    const glassbox: Glassbox = {
-      turn: async () => twin.turn,
-      setTurn,
-      join: async () => {
-        twin.hasVoxbox = true
-        built.ui.invalidate('ui.render')
-      },
-      show: async turn => {
-        await setTurn(turn)
-        await built.ui.open({ id: PANE, title: TITLE, columns: COLUMNS, backgroundColor: 'transparent' })
-      },
-    }
-    return { ...built, glassbox }
-  })
-
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await startTurns($)
@@ -235,6 +223,10 @@ export const register: Register = (on, options) => {
       .then(text => String((JSON.parse(text) as { version?: unknown }).version ?? ''))
       .catch(() => '')
     setRecordVersion(version)
+    // VOX e SYNTH: i prompt salvati e dov'è la voce.
+    await startVox($, section => {
+      isOpen[section] = true
+    }).catch(err => $.ui.log(`glassbox: vox not started: ${err}`))
     await $.command
       .register({
         name: COMMAND,
@@ -263,6 +255,7 @@ export const register: Register = (on, options) => {
   on('command.run', { command: COMMAND }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
     if (arg === 'close') {
+      await stopVox($).catch(() => undefined)
       await $.ui.close({ id: PANE }).catch(() => undefined)
       return { text: `Glassbox closed: /${COMMAND} reopens it.` }
     }
@@ -292,8 +285,9 @@ export const register: Register = (on, options) => {
     return ran
   }).catch(($, e, next) => next(e))
 
-  on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
-    if (twin.turn !== 'glassbox') return next(e)
+  on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    // Nell'editor di VOX e SYNTH scorre il campo, non il pannello.
+    if (vox.edit) return {}
     if (doc.isOpen) {
       if (contextAt && e.pointer?.row === contextAt.sliderRow) doc.left = clamp(doc.left + e.by * SLIDER_WHEEL, contextAt.maxLeft)
       else doc.offset = clamp(doc.offset + e.by * (e.pointer ? PREVIEW_WHEEL : 1), contextAt?.maxTop ?? 0)
@@ -321,7 +315,6 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
-    if (twin.turn !== 'glassbox') return next(e)
     const el: Els = $.ui.resolve(e)
     const { Box, Button, Text } = el
     const width = Math.max(24, e.props.bodyColumns)
@@ -329,6 +322,13 @@ export const register: Register = (on, options) => {
     const inner = width - len(INDENT) - 1
     const bodyRows = Math.max(SECTIONS.length, e.props.scroll.bodyRows)
     const now = Date.now()
+    const voxAct = voxActions($)
+
+    // Un testo o un prompt di VOX e SYNTH in modifica prende il posto di tutte le sezioni.
+    if (vox.edit) {
+      const color = (vox.edit.what === 'text' ? vox.edit.target : vox.edit.kind) === 'sintesi' ? SYNTH_COLOR : VOX_COLOR
+      return <Box flexDirection="column">{voxEditLines(el, width, bodyRows, vox.edit, color, voxAct)}</Box>
+    }
 
     const fileRows = visibleRows()
     const pressFile = (r: FileRow) => {
@@ -514,6 +514,8 @@ export const register: Register = (on, options) => {
           },
           s => jumpTo($, s),
         ),
+      vox: () => voxLines(inner, voxAct),
+      synth: () => synthLines(inner, voxAct),
     }
     const info: Record<SectionId, () => Seg[]> = {
       hooks: hooksInfo,
@@ -521,6 +523,8 @@ export const register: Register = (on, options) => {
       files: () => (filesView === 'tree' ? filesInfo() : filesView === 'guard' ? guardInfo() : touchedInfo()),
       turns: turnsInfo,
       sessions: () => sessionsInfo(now),
+      vox: () => voxInfo(now),
+      synth: synthInfo,
     }
     const sharedFiles = contestedCount()
     const tools: Record<SectionId, Tool[]> = {
@@ -606,6 +610,8 @@ export const register: Register = (on, options) => {
         },
       ],
       sessions: [{ key: 'sessions-refresh', label: '↻', dim: true, press: () => void refreshSessionsView($, true) }],
+      vox: voxTools(voxAct),
+      synth: synthTools(voxAct),
     }
 
     // Il titolo: la barretta colorata, il nome, le informazioni, gli strumenti a
@@ -677,18 +683,19 @@ export const register: Register = (on, options) => {
     }
 
     // Le righe di ogni sezione aperta; quella degli hook prende solo le sue,
-    // le altre si dividono il resto in parti uguali.
+    // le altre si dividono il resto in parti uguali. VOX e SYNTH della loro
+    // parte tengono solo le righe che hanno, e lasciano il resto alle altre.
     const lines = Object.fromEntries(SECTIONS.filter(s => isOpen[s.id]).map(s => [s.id, content[s.id]()])) as Partial<Record<SectionId, Line[]>>
     const headerRows = SECTIONS.reduce((n, s) => n + (isOpen[s.id] ? 2 : 1), 0)
     const hookRows = lines.hooks ? Math.min(HOOK_ROWS, lines.hooks.length) : 0
     const shared = SECTIONS.filter(s => isOpen[s.id] && s.id !== 'hooks')
     // In cima il titolo, quando il pannello è alto abbastanza.
-    const toVoxbox = () => {
-      twin.turn = 'voxbox'
-      redraw($)
-    }
-    const title = bodyRows >= TITLE_MIN_ROWS ? titleLines(el, width, version, twin.hasVoxbox ? toVoxbox : undefined) : []
-    const heights = share(Math.max(0, bodyRows - title.length - headerRows - hookRows), shared.length)
+    const title = bodyRows >= TITLE_MIN_ROWS ? titleLines(el, width, version) : []
+    const fair = share(Math.max(0, bodyRows - title.length - headerRows - hookRows), shared.length)
+    const compactRows = shared.map((s, i) => (COMPACT.has(s.id) ? Math.min(lines[s.id]?.length ?? 0, fair[i] ?? 0) : undefined))
+    const wide = shared.filter(s => !COMPACT.has(s.id))
+    const spare = share(compactRows.reduce<number>((n, rows, i) => n + (rows === undefined ? 0 : (fair[i] ?? 0) - rows), 0), wide.length)
+    const heights = shared.map((s, i) => compactRows[i] ?? (fair[i] ?? 0) + (spare[wide.indexOf(s)] ?? 0))
     const out: RenderElement[] = [...title]
     const nextSpans: typeof spans = []
     let row = title.length
@@ -710,7 +717,7 @@ export const register: Register = (on, options) => {
       offset[s.id] = clamp(offset[s.id], max)
       const from = offset[s.id]
       // Le prime righe che restano ferme mentre il resto scorre: in SESSIONS, questa sessione.
-      const pin = s.id === 'sessions' ? Math.min(sessionsPinned(), rows) : 0
+      const pin = Math.min(s.id === 'sessions' ? sessionsPinned() : s.id === 'vox' ? voxPinned() : s.id === 'synth' ? synthPinned() : 0, rows)
       nextSpans.push({ id: s.id, from: row, to: row + rows, max })
 
       const thumb = Math.max(1, Math.round((rows * rows) / Math.max(1, own.length)))

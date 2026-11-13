@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { SessionMessage } from 'claude-code'
 
-import { DEFAULTS, parseParams, paramsText, quickRequest, revive, vars } from '../hooks/prompts'
-import { cleanForSpeech, countWords, lastReply, listenTime, prosaWords, sintesiLines, wrap } from '../hooks/text'
+import { DEFAULTS, parseParams, paramsText, quickRequest, revive, vars } from '../hooks/vox-prompts'
+import { cleanForSpeech, countWords, lastReply, listenTime, prosaWords, sintesiLines, wrap } from '../hooks/vox-text'
 
 describe('la pulizia per la voce', () => {
   test('via codice, link, markdown e grafica del terminale', () => {

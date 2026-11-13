@@ -15,7 +15,8 @@ describe('i file cambiati da un comando', () => {
     ])
   })
 
-  test('un sed su un file pulito, uno su un file già modificato, un file nuovo: tutti in FILES', async ($, on) => {
+  // Il primo test del file che carica il mod: su una macchina carica supera i 5 secondi di partenza.
+  test('un sed su un file pulito, uno su un file già modificato, un file nuovo: tutti in FILES', { timeoutMs: 20_000 }, async ($, on) => {
     fakeEngine(on)
     const values = '/r/helm/values.yaml'
     FILES[values] = 'image:\n  tag: "v0.0.15-pre"\n'
