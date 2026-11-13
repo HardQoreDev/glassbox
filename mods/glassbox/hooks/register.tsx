@@ -28,6 +28,7 @@ import { configureRecord, recordInfo, setRecordVersion } from './record'
 import { EVERY_MS as SESSIONS_EVERY_MS, focusSession, label, refreshSessions, resetOwn, sessions, tick } from './sessions'
 import type { Session } from './sessions'
 import { contestedPaths, refreshGuard } from './guard'
+import { host } from './host'
 import { keepWarm } from './keepwarm'
 import { statsOf, statsText } from './stats'
 import { record } from './touched'
@@ -75,7 +76,7 @@ const TITLE_MIN_ROWS = 20
 
 type SectionId = 'hooks' | 'graph' | 'files' | 'turns' | 'sessions' | 'vox' | 'synth'
 // Ogni sezione ha il suo colore: la barretta, il titolo, la riga sotto, lo scorrimento.
-const SECTIONS: { id: SectionId; title: string; color: string }[] = [
+const ALL_SECTIONS: { id: SectionId; title: string; color: string }[] = [
   { id: 'hooks', title: 'HOOKS', color: '#4ade80' },
   { id: 'graph', title: 'GIT', color: '#59a4f9' },
   { id: 'files', title: 'FILES', color: FILES_COLOR },
@@ -87,6 +88,8 @@ const SECTIONS: { id: SectionId; title: string; color: string }[] = [
 // VOX e SYNTH prendono solo le righe del loro testo, fino alla loro parte; il
 // resto va alle altre sezioni.
 const COMPACT = new Set<SectionId>(['vox', 'synth'])
+// Le sezioni che l'agente in cui gira Glassbox ha davvero (vedi host.ts).
+let SECTIONS = ALL_SECTIONS
 
 type Seg = { text: string; color?: string; dim?: boolean; bold?: boolean }
 // `color` accende lo strumento anche quando non è scelto: la guardia che ha trovato qualcosa.
@@ -117,7 +120,7 @@ const READS = new Set(['Read', 'Grep', 'Glob', 'NotebookRead', 'LS'])
 const WRITES = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit'])
 
 async function refreshAll($: EngineInterface): Promise<void> {
-  const hooksChanged = await loadHooks($)
+  const hooksChanged = host.hidden.includes('hooks') ? false : await loadHooks($)
   const repoChanged = await refreshRepo($)
   const dirsChanged = await refreshDirs($)
   const previewChanged = await refreshPreview($)
@@ -212,6 +215,7 @@ const jumpTo = ($: EngineInterface, s: Session) =>
   })
 
 export const register: Register = (on, options) => {
+  SECTIONS = ALL_SECTIONS.filter(s => !host.hidden.includes(s.id))
   configureRecord(options)
   registerTurns(on)
 

@@ -9,6 +9,7 @@
 // sul nome porta herdr sul pane della sessione; ▸ in fondo apre sotto la
 // cartella, cosa costa tornarci e il comando per riprenderla (fuori da herdr,
 // o per questa sessione, lo fa anche il clic sul nome).
+import { host } from './host'
 import { keep } from './keepwarm'
 import { CACHE_TTL_MS, RELOAD_FACTOR, SOON_MS, agentsOf, cacheOf, counts, isHeavy, isWaiting, label, merged, minutes, ordered, refreshedAt, selfSession, sessions, span, tokens } from './sessions'
 import type { Cache, Session } from './sessions'
@@ -83,7 +84,7 @@ const detailTexts = (s: Session, c: Cache, now: number): string[] => {
       : []
   const failed = s.id === sessions.selfId && keep.error ? [`Last keep-warm failed: ${keep.error}.`] : []
   const where = [s.title ? s.name : '', s.cwd, s.pane ? `herdr ${s.pane}` : ''].filter(Boolean).join(' · ')
-  return [where, ...waits, ...agents, cost, ...kept, ...failed, `claude --resume ${s.id}`].filter(Boolean)
+  return [where, ...waits, ...agents, cost, ...kept, ...failed, host.resume(s.id)].filter(Boolean)
 }
 
 /** Si può portare herdr lì: gira in herdr, e non è questa. */

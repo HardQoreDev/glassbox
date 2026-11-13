@@ -62,6 +62,26 @@ mods/glassbox/bin/vox-setup.sh
 
 Finché manca, VOX lo dice e mostra il percorso dello script nella copia installata del plugin. Dettagli in [`mods/glassbox/README.md`](mods/glassbox/README.md#vox-and-synth-read-and-listen).
 
+### Glassbox in pi
+
+Lo stesso Glassbox gira anche in [pi](https://pi.dev), il coding agent da terminale (provato con la 1.5.2). Non è una seconda copia: la cartella [`pi/`](pi/) contiene un adattatore che traduce gli eventi di pi in quelli che Glassbox ascolta in Claude Code e ne disegna il pannello, quindi le sezioni sono le stesse e si aggiornano insieme.
+
+```bash
+pi install git:github.com/HardQoreDev/glassbox
+```
+
+A schermo intero (il modo di partenza di pi) il pannello sta a destra e la chat si stringe; con il mouse si premono i pulsanti e si scorre con la rotella. `alt+g` porta la tastiera nel pannello: `Tab` e le frecce passano da un pulsante all'altro, `Invio` preme, `PagSu` e `PagGiù` scorrono, `Esc` torna al prompt. `/glassbox` lo apre e `/glassbox close` lo chiude. Sotto le 110 colonne il pannello non si mostra.
+
+Cosa cambia rispetto a Claude Code:
+
+- **HOOKS non c'è**: pi non ha hook da shell da spegnere.
+- **SESSIONS** elenca le sessioni di pi che hanno Glassbox caricato (pi non tiene un registro delle sue sessioni: ognuna scrive il suo stato in `~/.pi/agent/glassbox/running/`). Il tempo che resta alla cache è calcolato su un'ora, come in Claude Code: con un provider che la tiene meno è ottimista.
+- **CONTEXT** mostra i blocchi di una risposta quando la richiesta è finita, non mentre arriva; il contesto per categoria di `/context` non c'è. In `system` c'è il prompt di sistema in una sola sezione.
+- **VOX e SYNTH** in `fast` usano un Haiku se pi ne ha uno con le credenziali, altrimenti il modello della sessione; `deep` rimanda il contesto dell'ultima richiesta con la domanda in più, senza scrivere nella sessione.
+- Il registro delle sessioni va in `~/.pi/agent/glassbox/sessions/`; `GLASSBOX_RECORD=0` lo spegne. I prompt di VOX e SYNTH stanno in `~/.pi/agent/glassbox/store.json`.
+
+pi non carica JSX, quindi il codice di Glassbox è compilato in `pi/dist/`, che sta in git: dopo una modifica a `mods/glassbox/hooks` va rifatta con `pi/build.sh` e committata (`pi/test.sh` fallisce se è rimasta indietro).
+
 ### copia-risposta
 
 Tre pulsanti in basso a destra, accanto al prompt:
@@ -101,11 +121,12 @@ claude --plugin-dir mods/glassbox      # una sessione con il mod caricato dalla 
 claude plugin validate mods/glassbox   # quello che Claude Code rifiuterebbe
 claude plugin test mods/glassbox       # i test in mods/glassbox/tests
 python3 -I mods/glassbox/tests/sessions_helper_test.py   # il test di bin/sessions.py
+pi/build.sh && pi/test.sh               # Glassbox in pi: ricompila pi/dist e lo prova con un modello finto
 ```
 
 Con `--plugin-dir` (o con la cartella in `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`) la sessione ricarica il mod a ogni salvataggio. Quando Claude Code carica un mod scrive i suoi tipi in `.claude-plugin/types/`; da lì `npx -p typescript tsc -p mods/glassbox --noEmit` controlla i tipi. Quella cartella non va in git.
 
-Prima di aprire una pull request: `claude plugin validate` e `claude plugin test` puliti per il mod che hai toccato.
+Prima di aprire una pull request: `claude plugin validate` e `claude plugin test` puliti per il mod che hai toccato. Se hai toccato `mods/glassbox/hooks`, anche `pi/build.sh` (con `pi/dist` nel commit) e `pi/test.sh`. Per vedere il pannello in pi senza credenziali: `pi --offline -ne -e pi/test/faux.ts -e . --model faux/faux-1`.
 
 ## Codice di terze parti
 

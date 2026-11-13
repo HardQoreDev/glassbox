@@ -8,6 +8,7 @@
 // velocità della voce.
 import type { RenderElement } from 'claude-code'
 
+import { host } from './host'
 import { fit, len } from './ui'
 import type { Els, Line } from './ui'
 import { armLeft, effectiveDeep, isReading, isStarting, levelLabel, shownText, sourceWords, vox } from './vox'
@@ -98,7 +99,7 @@ export function rewriteParts(kind: 'prosa' | 'sintesi', color: string, a: VoxAct
 }
 
 /** Cosa dice la sezione mentre il modello scrive. */
-export const writing = (kind: 'prosa' | 'sintesi'): string => (effectiveDeep(kind) ? 'The session fork is writing…' : 'Haiku is writing…')
+export const writing = (kind: 'prosa' | 'sintesi'): string => (effectiveDeep(kind) ? 'The session fork is writing…' : `${host.fast} is writing…`)
 
 // ---- VOX ---------------------------------------------------------------------
 

@@ -3,6 +3,7 @@
 // titolo i comandi, fermi mentre le righe scorrono: `◂ ▸` cambiano il numero
 // di righe, fast | deep scelgono chi scrive (Haiku, o un fork della sessione),
 // `prompt` apre il prompt e i suoi parametri, `edit` modifica la sintesi.
+import { host } from './host'
 import type { Line } from './ui'
 import { outputOf, vox } from './vox'
 import type { VoxActions } from './vox'
@@ -22,7 +23,7 @@ export function synthInfo(): Seg[] {
   if (!out) return [{ text: vox.text.trim() === '' ? 'no text in VOX' : 'not written', dim: true }]
   const n = out.text.split('\n').filter(l => l.trim() !== '').length
   const words = countWords(cleanForSpeech(out.text))
-  return [{ text: `${n} line${n === 1 ? '' : 's'} · ${out.deep ? 'session fork' : 'Haiku'} ${(out.ms / 1000).toFixed(1)}s · ${listenTime(words, vox.speed)}`, dim: true }]
+  return [{ text: `${n} line${n === 1 ? '' : 's'} · ${out.deep ? 'session fork' : host.fast} ${(out.ms / 1000).toFixed(1)}s · ${listenTime(words, vox.speed)}`, dim: true }]
 }
 
 /** I comandi accanto al titolo. */

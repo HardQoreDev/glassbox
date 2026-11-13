@@ -13,6 +13,7 @@
 //   analyses/*.md       le analisi chieste con `analyze` in CONTEXT
 // Il contesto della richiesta k è quello della k-1 tagliato a `keep`, più i
 // suoi `messages`: `replay` lo ricostruisce.
+import { host } from './host'
 import type { EngineInterface, PluginOptions, SessionContextBreakdown } from 'claude-code'
 
 import type { ApiMessage } from './context'
@@ -168,7 +169,7 @@ const fresh = (sessionId: string, project: string, now: string): SessionRecord =
   format: FORMAT,
   sessionId,
   project,
-  resume: `claude --resume ${sessionId}`,
+  resume: host.resume(sessionId),
   glassbox: rec.version,
   startedAt: now,
   updatedAt: now,

@@ -171,6 +171,12 @@ Until then VOX says so, with the path of the script in the installed copy of the
 
 Another Piper voice: `VOXBOX_VOICE=it_IT-paola-medium bin/vox-setup.sh`. To uninstall: `bin/vox-setup.sh --uninstall`. The edited prompts live in the plugin's store.
 
+## Glassbox in pi
+
+The same code also runs in [pi](https://pi.dev): `pi install git:github.com/HardQoreDev/glassbox`. The adapter in [`pi/`](../../pi) at the root of the repository turns pi's events into the ones Glassbox hooks in Claude Code and draws the pane; [`hooks/host.ts`](hooks/host.ts) holds the few things that differ between the two agents (the command that resumes a session, the sections the agent lacks). In pi there is no HOOKS section, SESSIONS lists the pi sessions that have Glassbox loaded, and `alt+g` moves the keyboard to the pane. The differences are listed in the [README of the repository](../../README.md#glassbox-in-pi).
+
+pi does not load JSX: after a change in `hooks/`, run `pi/build.sh` and commit `pi/dist`.
+
 ## Commands
 
 - `/glassbox` opens the pane, and says where the session is recorded.

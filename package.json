@@ -1,0 +1,25 @@
+{
+  "name": "glassbox",
+  "version": "0.18.0",
+  "description": "Glassbox for pi: a panel on the right with the git branches, the files changed in the session, what goes into the context of every request, the open sessions, and VOX and SYNTH to read, shorten and hear a reply",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./pi/src/extension.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "scripts": {
+    "build:pi": "pi/build.sh",
+    "check:pi": "pi/build.sh --check"
+  }
+}
