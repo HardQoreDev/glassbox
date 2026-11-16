@@ -26,6 +26,7 @@ import { contextLayout, contextLines } from './view-context';
 import { previewLayout, previewLines } from './view-preview';
 import { SESSIONS_COLOR, sessionLines, sessionsInfo, sessionsPinned } from './view-sessions';
 import { tagLines, tagView, tagsInfo } from './view-tags';
+import { menuLines } from './view-menu';
 import { titleLines } from './view-title';
 import { INPUT_RAIL, turnLines, turnsInfo } from './view-turns';
 import { startVox, stopVox, vox, voxActions } from './vox';
@@ -51,20 +52,27 @@ const FILES_COLOR = '#f0b429';
 // Sotto queste righe il titolo lascia il posto alle sezioni.
 const TITLE_MIN_ROWS = 20;
 // Ogni sezione ha il suo colore: la barretta, il titolo, la riga sotto, lo scorrimento.
+// `about` è quello che il menù delle sezioni dice di ognuna.
 const ALL_SECTIONS = [
-    { id: 'hooks', title: 'HOOKS', color: '#4ade80' },
-    { id: 'graph', title: 'GIT', color: '#59a4f9' },
-    { id: 'files', title: 'FILES', color: FILES_COLOR },
-    { id: 'turns', title: 'CONTEXT', color: INPUT_RAIL },
-    { id: 'sessions', title: 'SESSIONS', color: SESSIONS_COLOR },
-    { id: 'vox', title: 'VOX', color: VOX_COLOR },
-    { id: 'synth', title: 'SYNTH', color: SYNTH_COLOR },
+    { id: 'hooks', title: 'HOOKS', color: '#4ade80', about: "the session's hooks, to switch off" },
+    { id: 'graph', title: 'GIT', color: '#59a4f9', about: 'branches, commits and tags' },
+    { id: 'files', title: 'FILES', color: FILES_COLOR, about: 'changed files, the tree, the guard' },
+    { id: 'turns', title: 'CONTEXT', color: INPUT_RAIL, about: 'what goes into every request' },
+    { id: 'sessions', title: 'SESSIONS', color: SESSIONS_COLOR, about: 'open sessions and their cache' },
+    { id: 'vox', title: 'VOX', color: VOX_COLOR, about: 'a text to read and to hear' },
+    { id: 'synth', title: 'SYNTH', color: SYNTH_COLOR, about: 'the same text in a few lines' },
 ];
 // VOX e SYNTH prendono solo le righe del loro testo, fino alla loro parte; il
 // resto va alle altre sezioni.
 const COMPACT = new Set(['vox', 'synth']);
 // Le sezioni che l'agente in cui gira Glassbox ha davvero (vedi host.ts).
 let SECTIONS = ALL_SECTIONS;
+// Quelle che la persona ha tolto dal pannello con il menù (≡ sections sotto il
+// titolo, o /glassbox sections): la scelta sta nello store del plugin.
+const SHOWN_KEY = 'sections';
+const off = new Set();
+let isMenuOpen = false;
+const shownSections = () => SECTIONS.filter(s => !off.has(s.id));
 // Quali sezioni sono aperte, e da che riga parte ciascuna. VOX e SYNTH si
 // aprono dal titolo, o da sole al primo dei loro comandi.
 const isOpen = { hooks: true, graph: true, files: true, turns: true, sessions: true, vox: false, synth: false };
@@ -197,6 +205,13 @@ export const register = (on, options) => {
                     .then(text => String(JSON.parse(text).version ?? ''))
                     .catch(() => ''));
         setRecordVersion(version);
+        // Le sezioni tolte dal pannello nelle sessioni di prima.
+        const saved = await $.store.get(SHOWN_KEY).catch(() => undefined);
+        off.clear();
+        for (const id of Array.isArray(saved?.off) ? saved.off : [])
+            if (typeof id === 'string')
+                off.add(id);
+        isMenuOpen = false;
         // VOX e SYNTH: i prompt salvati e dov'è la voce.
         await startVox($, section => {
             isOpen[section] = true;
@@ -204,8 +219,8 @@ export const register = (on, options) => {
         await $.command
             .register({
             name: COMMAND,
-            description: 'Opens Glassbox on the right: hooks, git, files, what goes into the context and the open sessions (close)',
-            argumentHint: '[close]',
+            description: 'Opens Glassbox on the right: hooks, git, files, what goes into the context and the open sessions (close, sections)',
+            argumentHint: '[close|sections]',
         })
             .catch(err => $.ui.log(`glassbox: /${COMMAND} not registered: ${err}`));
         // La sessione parte subito; il pannello si riempie quando git ha risposto.
@@ -233,6 +248,11 @@ export const register = (on, options) => {
         }
         await refreshAll($);
         await $.ui.open({ id: PANE, title: TITLE, columns: COLUMNS, backgroundColor: 'transparent' });
+        if (arg === 'sections') {
+            isMenuOpen = true;
+            redraw($);
+            return { text: 'Glassbox: choose the sections the pane shows.' };
+        }
         const hint = e.presentation.isFullscreen ? '' : ' It is above the prompt for now: /tui fullscreen docks it on the right.';
         const recorded = recordInfo();
         const where = recorded ? ` This session is recorded in ${recorded.dir}.` : '';
@@ -254,8 +274,8 @@ export const register = (on, options) => {
         return ran;
     }).catch(($, e, next) => next(e));
     on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e) => {
-        // Nell'editor di VOX e SYNTH scorre il campo, non il pannello.
-        if (vox.edit)
+        // Nell'editor di VOX e SYNTH scorre il campo, non il pannello; il menù non scorre.
+        if (vox.edit || isMenuOpen)
             return {};
         if (doc.isOpen) {
             if (contextAt && e.pointer?.row === contextAt.sliderRow)
@@ -293,13 +313,31 @@ export const register = (on, options) => {
         const width = Math.max(24, e.props.bodyColumns);
         // Il rientro a sinistra, una colonna a destra per lo scorrimento.
         const inner = width - len(INDENT) - 1;
-        const bodyRows = Math.max(SECTIONS.length, e.props.scroll.bodyRows);
+        const sections = shownSections();
+        const bodyRows = Math.max(sections.length, e.props.scroll.bodyRows);
         const now = Date.now();
         const voxAct = voxActions($);
         // Un testo o un prompt di VOX e SYNTH in modifica prende il posto di tutte le sezioni.
         if (vox.edit) {
             const color = (vox.edit.what === 'text' ? vox.edit.target : vox.edit.kind) === 'sintesi' ? SYNTH_COLOR : VOX_COLOR;
             return h(Box, { flexDirection: "column" }, voxEditLines(el, width, bodyRows, vox.edit, color, voxAct));
+        }
+        // Il menù delle sezioni prende il posto del pannello.
+        if (isMenuOpen) {
+            const items = SECTIONS.map(s => ({ ...s, isOn: !off.has(s.id) }));
+            const toggle = (id) => {
+                if (off.has(id))
+                    off.delete(id);
+                else
+                    off.add(id);
+                redraw($);
+                void $.store.set(SHOWN_KEY, { off: [...off] }).catch(err => $.ui.log(`glassbox: sections not saved: ${err}`));
+            };
+            const back = () => {
+                isMenuOpen = false;
+                redraw($);
+            };
+            return h(Box, { flexDirection: "column" }, menuLines(el, width, items, toggle, back));
         }
         const fileRows = visibleRows();
         const pressFile = (r) => {
@@ -596,12 +634,16 @@ export const register = (on, options) => {
         // Le righe di ogni sezione aperta; quella degli hook prende solo le sue,
         // le altre si dividono il resto in parti uguali. VOX e SYNTH della loro
         // parte tengono solo le righe che hanno, e lasciano il resto alle altre.
-        const lines = Object.fromEntries(SECTIONS.filter(s => isOpen[s.id]).map(s => [s.id, content[s.id]()]));
-        const headerRows = SECTIONS.reduce((n, s) => n + (isOpen[s.id] ? 2 : 1), 0);
+        const lines = Object.fromEntries(sections.filter(s => isOpen[s.id]).map(s => [s.id, content[s.id]()]));
+        const headerRows = sections.reduce((n, s) => n + (isOpen[s.id] ? 2 : 1), 0);
         const hookRows = lines.hooks ? Math.min(HOOK_ROWS, lines.hooks.length) : 0;
-        const shared = SECTIONS.filter(s => isOpen[s.id] && s.id !== 'hooks');
+        const shared = sections.filter(s => isOpen[s.id] && s.id !== 'hooks');
         // In cima il titolo, quando il pannello è alto abbastanza.
-        const title = bodyRows >= TITLE_MIN_ROWS ? titleLines(el, width, version) : [];
+        const title = bodyRows >= TITLE_MIN_ROWS ? titleLines(el, width, version, () => {
+            isMenuOpen = true;
+            redraw($);
+        })
+            : [];
         const fair = share(Math.max(0, bodyRows - title.length - headerRows - hookRows), shared.length);
         const compactRows = shared.map((s, i) => (COMPACT.has(s.id) ? Math.min(lines[s.id]?.length ?? 0, fair[i] ?? 0) : undefined));
         const wide = shared.filter(s => !COMPACT.has(s.id));
@@ -610,7 +652,11 @@ export const register = (on, options) => {
         const out = [...title];
         const nextSpans = [];
         let row = title.length;
-        for (const s of SECTIONS) {
+        // Senza nessuna sezione resta il titolo, e come riaverle.
+        if (sections.length === 0)
+            out.push(h(Box, { key: "sections:none", height: 1, overflow: "hidden" },
+                h(Text, { dimColor: true }, fit(`${INDENT}No section shown: ≡ sections, or /${COMMAND} sections.`, width))));
+        for (const s of sections) {
             const head = header(s.id, s.title, s.color);
             out.push(...head);
             row += head.length;

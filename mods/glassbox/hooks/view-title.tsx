@@ -37,8 +37,14 @@ const gradient = (el: Els, text: string, light: number): RenderElement[] => {
   return chars.map((ch, i) => (ch === ' ' ? <el.Text> </el.Text> : <el.Text color={shade(i / Math.max(1, chars.length - 1), light)}>{ch}</el.Text>))
 }
 
-/** Le righe del titolo, l'ultima vuota a staccarlo dalle sezioni. */
-export function titleLines(el: Els, width: number, version: string): RenderElement[] {
+// Il menù delle sezioni, sotto il motto.
+const MENU = '≡ sections'
+
+/**
+ * Le righe del titolo, l'ultima a staccarlo dalle sezioni: con `onMenu` porta
+ * a destra, se ci sta, il pulsante che apre il menù delle sezioni.
+ */
+export function titleLines(el: Els, width: number, version: string, onMenu?: () => void): RenderElement[] {
   const tag = version ? `v${version}` : ''
   const logoW = len(LEFT) + len(LOGO[0]!)
   const row = (key: string, left: RenderElement[], leftW: number, right: string, italic: boolean) => (
@@ -52,11 +58,19 @@ export function titleLines(el: Els, width: number, version: string): RenderEleme
       )}
     </el.Box>
   )
-  const blank = (
-    <el.Box key="title:gap" height={1}>
-      <el.Text> </el.Text>
-    </el.Box>
-  )
+  const blank =
+    onMenu && width - len(MENU) >= len(LEFT) ? (
+      <el.Box key="title:gap" flexDirection="row" height={1} overflow="hidden">
+        <el.Text>{' '.repeat(width - len(MENU))}</el.Text>
+        <el.Button key="title:menu" plain label="Sections" onPress={onMenu}>
+          <el.Text dimColor>{MENU}</el.Text>
+        </el.Button>
+      </el.Box>
+    ) : (
+      <el.Box key="title:gap" height={1}>
+        <el.Text> </el.Text>
+      </el.Box>
+    )
   if (width < logoW + 1) {
     const word = 'G L A S S B O X'
     return [row('title:0', gradient(el, word, 1), len(LEFT) + len(word), tag, false), blank]

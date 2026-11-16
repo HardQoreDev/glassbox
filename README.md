@@ -27,6 +27,8 @@ Claude Code salva già da solo la trascrizione di ogni sessione in `~/.claude/pr
 
 Una sessione ripresa continua nella stessa cartella. Nella tendina, la vista **flow** dice quante richieste sono registrate e quanto pesano su disco. Il registro contiene tutto quello che è passato nel contesto, compresi i file letti, quindi va trattato come le trascrizioni di Claude Code. Si spegne o si sposta dalle opzioni del plugin (`recordSessions`, `sessionsDir`, nel menu `/config` o in `pluginConfigs` delle impostazioni).
 
+Quali sezioni mostrare si sceglie da un menù a spunte: `≡ sections` sotto il titolo, oppure `/glassbox sections`. Una sezione tolta sparisce dal pannello con tutto il suo titolo e lascia le righe alle altre (chiuderla dal titolo, invece, la lascia lì ripiegata); la scelta resta salvata per le sessioni dopo.
+
 Si apre con `/glassbox` e si chiude con `/glassbox close`. Nel terminale sta a destra con il layout a schermo intero (`/tui fullscreen`) e almeno 110 colonne; altrimenti compare sopra il prompt. Dettagli in [`mods/glassbox/README.md`](mods/glassbox/README.md).
 
 #### Spegnere gli hook: la regola `hook-switch`
@@ -70,7 +72,7 @@ Lo stesso Glassbox gira anche in [pi](https://pi.dev), il coding agent da termin
 pi install git:github.com/HardQoreDev/glassbox
 ```
 
-A schermo intero (il modo di partenza di pi) il pannello sta a destra e la chat si stringe; con il mouse si premono i pulsanti e si scorre con la rotella. `alt+g` porta la tastiera nel pannello: `Tab` e le frecce passano da un pulsante all'altro, `Invio` preme, `PagSu` e `PagGiù` scorrono, `Esc` torna al prompt. `/glassbox` lo apre e `/glassbox close` lo chiude. Sotto le 110 colonne il pannello non si mostra.
+A schermo intero (il modo di partenza di pi) il pannello sta a destra e la chat si stringe; con il mouse si premono i pulsanti e si scorre con la rotella. `alt+g` porta la tastiera nel pannello: `Tab` e le frecce passano da un pulsante all'altro, `Invio` preme, `PagSu` e `PagGiù` scorrono, `Esc` torna al prompt. `/glassbox` lo apre, `/glassbox close` lo chiude e `/glassbox sections` apre il menù delle sezioni (la scelta sta in `~/.pi/agent/glassbox/store.json`, separata da quella di Claude Code). Sotto le 110 colonne il pannello non si mostra.
 
 Cosa cambia rispetto a Claude Code:
 

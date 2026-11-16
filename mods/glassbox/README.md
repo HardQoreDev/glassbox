@@ -180,6 +180,7 @@ pi does not load JSX: after a change in `hooks/`, run `pi/build.sh` and commit `
 ## Commands
 
 - `/glassbox` opens the pane, and says where the session is recorded.
+- `/glassbox sections` opens the checklist of the sections, the same as `≡ sections` under the title: a tick for each section the pane shows. A section taken off leaves the pane with its title row too, and its rows go to the others (collapsing it from its title keeps the row). The choice is saved for the next sessions.
 - `/glassbox close` closes it, stops `rec` and shuts the voice engine down.
 
 In the terminal Glassbox docks on the right in the fullscreen layout (`/tui fullscreen`) with at least 110 columns; otherwise it shows above the prompt.

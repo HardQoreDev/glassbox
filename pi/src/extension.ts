@@ -438,7 +438,7 @@ export default function glassbox(pi: any) {
   pi.on('tool_execution_end', (e: any) => toolEnded(e.toolCallId, { text: '', isError: e.isError === true }))
 
   pi.registerCommand('glassbox', {
-    description: 'Opens Glassbox on the right: git, files, what goes into the context, the open sessions, VOX and SYNTH (close)',
+    description: 'Opens Glassbox on the right: git, files, what goes into the context, the open sessions, VOX and SYNTH (close, sections)',
     handler: async (args: string, c: any) => {
       ctx = c
       if (!engine) return c.ui.notify('Glassbox needs the terminal UI.', 'warning')
