@@ -6,7 +6,7 @@ Claude Code as a glass box rather than a black box. Glassbox is a pane on the ri
 /plugin install glassbox --marketplace HardQoreDev/glassbox
 ```
 
-The repository is private: you need access to the HardQoreDev organization on GitHub and git set up on your machine (SSH or `gh auth login`). Claude Code 2.1.287 or later.
+Claude Code 2.1.287 or later.
 
 ## The seven sections
 

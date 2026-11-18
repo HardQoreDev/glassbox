@@ -6,3 +6,5 @@
 *.swp
 *.log
 node_modules/
+# Guide generate da /team-onboarding: restano sul computer di chi le crea.
+ONBOARDING.md

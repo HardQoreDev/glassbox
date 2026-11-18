@@ -96,8 +96,6 @@ Tre pulsanti in basso a destra, accanto al prompt:
 
 ## Installazione
 
-La repo è privata: serve accesso all'organizzazione HardQoreDev su GitHub e git configurato sul tuo computer (SSH o `gh auth login`).
-
 Al prompt di una sessione di Claude Code:
 
 ```
@@ -118,8 +116,10 @@ Se carichi già questi mod da una cartella con `CLAUDE_CODE_PLUGIN_DIRS`, non in
 
 ## Sviluppare
 
+I contributi sono benvenuti: come proporli è in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ```bash
-git clone git@github.com:HardQoreDev/glassbox.git
+git clone https://github.com/HardQoreDev/glassbox.git
 cd glassbox
 claude --plugin-dir mods/glassbox      # una sessione con il mod caricato dalla cartella
 claude plugin validate mods/glassbox   # quello che Claude Code rifiuterebbe
@@ -135,3 +135,7 @@ Prima di aprire una pull request: `claude plugin validate` e `claude plugin test
 ## Codice di terze parti
 
 `glassbox` contiene codice ripreso da [filetree](https://github.com/data-goblin/claude-code-filetree) e da [turn-inspector](https://github.com/davila7/claude-code-templates), entrambi con licenza MIT: dettagli in [`mods/glassbox/THIRD-PARTY.md`](mods/glassbox/THIRD-PARTY.md).
+
+## Licenza
+
+MIT: vedi [`LICENSE`](LICENSE). Il codice di terze parti mantiene la sua licenza, elencata in [`mods/glassbox/THIRD-PARTY.md`](mods/glassbox/THIRD-PARTY.md).
